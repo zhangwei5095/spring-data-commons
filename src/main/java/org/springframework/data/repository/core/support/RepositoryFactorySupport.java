@@ -31,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
+import org.springframework.aop.ProxyMethodInvocation;
+import org.springframework.aop.framework.Advised;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.aop.framework.ReflectiveMethodInvocation;
 import org.springframework.aop.interceptor.ExposeInvocationInterceptor;
@@ -130,7 +132,7 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 		this.evaluationContextProvider = evaluationContextProvider == null ? DefaultEvaluationContextProvider.INSTANCE
 				: evaluationContextProvider;
 	}
-	
+
 	/**
 	 * Configures the {@link QueryAugmentor}s to be used with the repository instances about to be created.
 	 * 
@@ -628,7 +630,7 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 			return result;
 		}
 	}
-	
+
 	/**
 	 * {@link RepositoryProxyPostProcessor} registering an {@link ExposeInvocationInterceptor} to make the repository
 	 * level method invocation available to the infrastructure.
@@ -641,9 +643,10 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 
 		/* 
 		 * (non-Javadoc)
-		 * @see org.springframework.data.repository.core.support.RepositoryProxyPostProcessor#postProcess(org.springframework.aop.framework.ProxyFactory, java.lang.Object)
+		 * @see org.springframework.data.repository.core.support.RepositoryProxyPostProcessor#postProcess(org.springframework.aop.framework.ProxyFactory, org.springframework.data.repository.core.RepositoryInformation)
 		 */
-		public void postProcess(ProxyFactory factory) {
+		@Override
+		public void postProcess(ProxyFactory factory, RepositoryInformation repositoryInformation) {
 			factory.addAdvice(ExposeInvocationInterceptor.INSTANCE);
 		}
 	}
@@ -671,7 +674,7 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 
 			if (invocation instanceof ReflectiveMethodInvocation) {
 				Advised proxy = (Advised) ((ReflectiveMethodInvocation) invocation).getProxy();
-				return Arrays.asList((Class<?>[]) proxy.getProxiedInterfaces());
+				return Arrays.asList(proxy.getProxiedInterfaces());
 			}
 
 			return Collections.<Class<?>> singletonList(getMethodInvocation().getThis().getClass());
