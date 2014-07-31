@@ -87,8 +87,8 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 	private ClassLoader classLoader = org.springframework.util.ClassUtils.getDefaultClassLoader();
 	private EvaluationContextProvider evaluationContextProvider = DefaultEvaluationContextProvider.INSTANCE;
 
-	private QueryCollectingQueryCreationListener collectingListener = new QueryCollectingQueryCreationListener();
 	private QueryAugmentationEngine augmentationEngine = QueryAugmentationEngine.NONE;
+	private QueryCollectingQueryCreationListener collectingListener = new QueryCollectingQueryCreationListener();
 
 	public RepositoryFactorySupport() {
 		this.queryPostProcessors.add(collectingListener);
@@ -384,6 +384,11 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 
 			for (Method method : queryMethods) {
 				RepositoryQuery query = lookupStrategy.resolveQuery(method, repositoryInformation, namedQueries);
+
+				if (query instanceof QueryAugmentationEngineAware) {
+					((QueryAugmentationEngineAware) query).setQueryAugmentationEngine(augmentationEngine);
+				}
+
 				invokeListeners(query);
 				queries.put(method, query);
 			}
