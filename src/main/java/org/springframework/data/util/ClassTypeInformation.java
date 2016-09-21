@@ -133,7 +133,12 @@ public class ClassTypeInformation<S> extends TypeDiscoverer<S> {
 			map.put(entry.getKey(), entry.getValue());
 
 			if (value instanceof Class) {
-				map.putAll(getTypeVariableMap((Class<?>) value, visited));
+
+				for (Entry<TypeVariable<?>, Type> nestedEntry : getTypeVariableMap((Class<?>) value, visited).entrySet()) {
+					if (!map.containsKey(nestedEntry.getKey())) {
+						map.put(nestedEntry.getKey(), nestedEntry.getValue());
+					}
+				}
 			}
 		}
 
@@ -165,6 +170,15 @@ public class ClassTypeInformation<S> extends TypeDiscoverer<S> {
 	@Override
 	public boolean isAssignableFrom(TypeInformation<?> target) {
 		return getType().isAssignableFrom(target.getType());
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.data.util.TypeDiscoverer#specialize(org.springframework.data.util.ClassTypeInformation)
+	 */
+	@Override
+	public TypeInformation<?> specialize(ClassTypeInformation<?> type) {
+		return type;
 	}
 
 	/* 

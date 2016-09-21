@@ -34,6 +34,7 @@ import org.springframework.core.BridgeMethodResolver;
 import org.springframework.dao.support.PersistenceExceptionTranslationInterceptor;
 import org.springframework.data.repository.core.RepositoryInformation;
 import org.springframework.transaction.annotation.Ejb3TransactionAnnotationParser;
+import org.springframework.transaction.annotation.JtaTransactionAnnotationParser;
 import org.springframework.transaction.annotation.SpringTransactionAnnotationParser;
 import org.springframework.transaction.annotation.TransactionAnnotationParser;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +57,7 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 
 	private final BeanFactory beanFactory;
 	private final String transactionManagerName;
+	private final boolean enableDefaultTransactions;
 
 	/**
 	 * Creates a new {@link TransactionalRepositoryProxyPostProcessor} using the given {@link ListableBeanFactory} and
@@ -63,14 +65,17 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 	 * 
 	 * @param beanFactory must not be {@literal null}.
 	 * @param transactionManagerName must not be {@literal null} or empty.
+	 * @param enableDefaultTransaction
 	 */
-	public TransactionalRepositoryProxyPostProcessor(ListableBeanFactory beanFactory, String transactionManagerName) {
+	public TransactionalRepositoryProxyPostProcessor(ListableBeanFactory beanFactory, String transactionManagerName,
+			boolean enableDefaultTransaction) {
 
 		Assert.notNull(beanFactory);
 		Assert.notNull(transactionManagerName);
 
 		this.beanFactory = beanFactory;
 		this.transactionManagerName = transactionManagerName;
+		this.enableDefaultTransactions = enableDefaultTransaction;
 	}
 
 	/*
@@ -81,6 +86,7 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 
 		CustomAnnotationTransactionAttributeSource transactionAttributeSource = new CustomAnnotationTransactionAttributeSource();
 		transactionAttributeSource.setRepositoryInformation(repositoryInformation);
+		transactionAttributeSource.setEnableDefaultTransactions(enableDefaultTransactions);
 
 		TransactionInterceptor transactionInterceptor = new TransactionInterceptor(null, transactionAttributeSource);
 		transactionInterceptor.setTransactionManagerBeanName(transactionManagerName);
@@ -105,10 +111,10 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 	 * working with transaction metadata in JDK 1.5+ annotation format.
 	 * <p>
 	 * This class reads Spring's JDK 1.5+ {@link Transactional} annotation and exposes corresponding transaction
-	 * attributes to Spring's transaction infrastructure. Also supports EJB3's {@link javax.ejb.TransactionAttribute}
-	 * annotation (if present). This class may also serve as base class for a custom TransactionAttributeSource, or get
-	 * customized through {@link TransactionAnnotationParser} strategies.
-	 * 
+	 * attributes to Spring's transaction infrastructure. Also supports JTA 1.2's and EJB3's
+	 * {@link javax.ejb.TransactionAttribute} annotation (if present). This class may also serve as base class for a
+	 * custom TransactionAttributeSource, or get customized through {@link TransactionAnnotationParser} strategies.
+	 *
 	 * @author Colin Sampaleanu
 	 * @author Juergen Hoeller
 	 * @since 1.2
@@ -119,43 +125,50 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 	 * @see org.springframework.transaction.interceptor.TransactionInterceptor#setTransactionAttributeSource
 	 * @see org.springframework.transaction.interceptor.TransactionProxyFactoryBean#setTransactionAttributeSource
 	 */
-	static class CustomAnnotationTransactionAttributeSource extends AbstractFallbackTransactionAttributeSource implements
-			Serializable {
+	@SuppressWarnings("serial")
+	static class CustomAnnotationTransactionAttributeSource extends AbstractFallbackTransactionAttributeSource
+			implements Serializable {
 
-		private static final long serialVersionUID = 4841944452113159864L;
+		private static final boolean jta12Present = ClassUtils.isPresent("javax.transaction.Transactional",
+				CustomAnnotationTransactionAttributeSource.class.getClassLoader());
+
 		private static final boolean ejb3Present = ClassUtils.isPresent("javax.ejb.TransactionAttribute",
 				CustomAnnotationTransactionAttributeSource.class.getClassLoader());
 
 		private final boolean publicMethodsOnly;
+
 		private final Set<TransactionAnnotationParser> annotationParsers;
 
 		/**
-		 * Create a default AnnotationTransactionAttributeSource, supporting public methods that carry the
-		 * <code>Transactional</code> annotation or the EJB3 {@link javax.ejb.TransactionAttribute} annotation.
+		 * Create a default CustomAnnotationTransactionAttributeSource, supporting public methods that carry the
+		 * {@code Transactional} annotation or the EJB3 {@link javax.ejb.TransactionAttribute} annotation.
 		 */
 		public CustomAnnotationTransactionAttributeSource() {
 			this(true);
 		}
 
 		/**
-		 * Create a custom AnnotationTransactionAttributeSource, supporting public methods that carry the
-		 * <code>Transactional</code> annotation or the EJB3 {@link javax.ejb.TransactionAttribute} annotation.
+		 * Create a custom CustomAnnotationTransactionAttributeSource, supporting public methods that carry the
+		 * {@code Transactional} annotation or the EJB3 {@link javax.ejb.TransactionAttribute} annotation.
 		 * 
-		 * @param publicMethodsOnly whether to support public methods that carry the <code>Transactional</code> annotation
-		 *          only (typically for use with proxy-based AOP), or protected/private methods as well (typically used with
+		 * @param publicMethodsOnly whether to support public methods that carry the {@code Transactional} annotation only
+		 *          (typically for use with proxy-based AOP), or protected/private methods as well (typically used with
 		 *          AspectJ class weaving)
 		 */
 		public CustomAnnotationTransactionAttributeSource(boolean publicMethodsOnly) {
 			this.publicMethodsOnly = publicMethodsOnly;
 			this.annotationParsers = new LinkedHashSet<TransactionAnnotationParser>(2);
 			this.annotationParsers.add(new SpringTransactionAnnotationParser());
+			if (jta12Present) {
+				this.annotationParsers.add(new JtaTransactionAnnotationParser());
+			}
 			if (ejb3Present) {
 				this.annotationParsers.add(new Ejb3TransactionAnnotationParser());
 			}
 		}
 
 		/**
-		 * Create a custom AnnotationTransactionAttributeSource.
+		 * Create a custom CustomAnnotationTransactionAttributeSource.
 		 * 
 		 * @param annotationParser the TransactionAnnotationParser to use
 		 */
@@ -166,7 +179,21 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 		}
 
 		/**
-		 * Create a custom AnnotationTransactionAttributeSource.
+		 * Create a custom CustomAnnotationTransactionAttributeSource.
+		 * 
+		 * @param annotationParsers the TransactionAnnotationParsers to use
+		 */
+		public CustomAnnotationTransactionAttributeSource(TransactionAnnotationParser... annotationParsers) {
+			this.publicMethodsOnly = true;
+			Assert.notEmpty(annotationParsers, "At least one TransactionAnnotationParser needs to be specified");
+			Set<TransactionAnnotationParser> parsers = new LinkedHashSet<TransactionAnnotationParser>(
+					annotationParsers.length);
+			Collections.addAll(parsers, annotationParsers);
+			this.annotationParsers = parsers;
+		}
+
+		/**
+		 * Create a custom CustomAnnotationTransactionAttributeSource.
 		 * 
 		 * @param annotationParsers the TransactionAnnotationParsers to use
 		 */
@@ -190,13 +217,12 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 		 * Determine the transaction attribute for the given method or class.
 		 * <p>
 		 * This implementation delegates to configured {@link TransactionAnnotationParser TransactionAnnotationParsers} for
-		 * parsing known annotations into Spring's metadata attribute class. Returns <code>null</code> if it's not
-		 * transactional.
+		 * parsing known annotations into Spring's metadata attribute class. Returns {@code null} if it's not transactional.
 		 * <p>
 		 * Can be overridden to support custom annotations that carry transaction metadata.
 		 * 
 		 * @param ae the annotated method or class
-		 * @return TransactionAttribute the configured transaction attribute, or <code>null</code> if none was found
+		 * @return TransactionAttribute the configured transaction attribute, or {@code null} if none was found
 		 */
 		protected TransactionAttribute determineTransactionAttribute(AnnotatedElement ae) {
 			for (TransactionAnnotationParser annotationParser : this.annotationParsers) {
@@ -214,6 +240,24 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 		@Override
 		protected boolean allowPublicMethodsOnly() {
 			return this.publicMethodsOnly;
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			if (this == other) {
+				return true;
+			}
+			if (!(other instanceof CustomAnnotationTransactionAttributeSource)) {
+				return false;
+			}
+			CustomAnnotationTransactionAttributeSource otherTas = (CustomAnnotationTransactionAttributeSource) other;
+			return (this.annotationParsers.equals(otherTas.annotationParsers)
+					&& this.publicMethodsOnly == otherTas.publicMethodsOnly);
+		}
+
+		@Override
+		public int hashCode() {
+			return this.annotationParsers.hashCode();
 		}
 	}
 
@@ -259,12 +303,20 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 		final Map<Object, TransactionAttribute> attributeCache = new ConcurrentHashMap<Object, TransactionAttribute>();
 
 		private RepositoryInformation repositoryInformation;
+		private boolean enableDefaultTransactions = true;
 
 		/**
 		 * @param repositoryInformation the repositoryInformation to set
 		 */
 		public void setRepositoryInformation(RepositoryInformation repositoryInformation) {
 			this.repositoryInformation = repositoryInformation;
+		}
+
+		/**
+		 * @param enableDefaultTransactions the enableDefaultTransactions to set
+		 */
+		public void setEnableDefaultTransactions(boolean enableDefaultTransactions) {
+			this.enableDefaultTransactions = enableDefaultTransactions;
 		}
 
 		/**
@@ -349,7 +401,7 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 				// Last fallback is the class of the original method.
 				txAtt = findTransactionAttribute(method.getDeclaringClass());
 
-				if (txAtt != null) {
+				if (txAtt != null || !enableDefaultTransactions) {
 					return txAtt;
 				}
 			}
@@ -366,6 +418,10 @@ class TransactionalRepositoryProxyPostProcessor implements RepositoryProxyPostPr
 			txAtt = findTransactionAttribute(specificMethod.getDeclaringClass());
 			if (txAtt != null) {
 				return txAtt;
+			}
+
+			if (!enableDefaultTransactions) {
+				return null;
 			}
 
 			// Fallback to implementation class transaction settings of nothing found

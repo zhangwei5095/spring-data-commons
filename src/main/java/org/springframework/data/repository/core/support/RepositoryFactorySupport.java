@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2014 the original author or authors.
+ * Copyright 2008-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,7 @@
  */
 package org.springframework.data.repository.core.support;
 
-import static org.springframework.util.ReflectionUtils.*;
-
 import java.io.Serializable;
-import java.lang.invoke.MethodHandles;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -29,12 +26,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
-import org.springframework.aop.ProxyMethodInvocation;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.aop.interceptor.ExposeInvocationInterceptor;
+import org.springframework.beans.BeanUtils;
+import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanClassLoaderAware;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
 import org.springframework.core.GenericTypeResolver;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.convert.TypeDescriptor;
+import org.springframework.data.projection.DefaultMethodInvokingMethodInterceptor;
+import org.springframework.data.projection.SpelAwareProxyProjectionFactory;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.EntityInformation;
 import org.springframework.data.repository.core.NamedQueries;
@@ -47,6 +50,7 @@ import org.springframework.data.repository.query.QueryLookupStrategy.Key;
 import org.springframework.data.repository.query.QueryMethod;
 import org.springframework.data.repository.query.RepositoryQuery;
 import org.springframework.data.repository.util.ClassUtils;
+import org.springframework.data.util.ReflectionUtils;
 import org.springframework.util.Assert;
 import org.springframework.util.ObjectUtils;
 
@@ -57,19 +61,22 @@ import org.springframework.util.ObjectUtils;
  * 
  * @author Oliver Gierke
  */
-public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
+public abstract class RepositoryFactorySupport implements BeanClassLoaderAware, BeanFactoryAware {
 
 	private static final boolean IS_JAVA_8 = org.springframework.util.ClassUtils.isPresent("java.util.Optional",
 			RepositoryFactorySupport.class.getClassLoader());
+	private static final Class<?> TRANSACTION_PROXY_TYPE = getTransactionProxyType();
 
 	private final Map<RepositoryInformationCacheKey, RepositoryInformation> repositoryInformationCache = new HashMap<RepositoryInformationCacheKey, RepositoryInformation>();
 	private final List<RepositoryProxyPostProcessor> postProcessors = new ArrayList<RepositoryProxyPostProcessor>();
 
+	private Class<?> repositoryBaseClass;
 	private QueryLookupStrategy.Key queryLookupStrategyKey;
 	private List<QueryCreationListener<?>> queryPostProcessors = new ArrayList<QueryCreationListener<?>>();
 	private NamedQueries namedQueries = PropertiesBasedNamedQueries.EMPTY;
 	private ClassLoader classLoader = org.springframework.util.ClassUtils.getDefaultClassLoader();
 	private EvaluationContextProvider evaluationContextProvider = DefaultEvaluationContextProvider.INSTANCE;
+	private BeanFactory beanFactory;
 
 	private QueryCollectingQueryCreationListener collectingListener = new QueryCollectingQueryCreationListener();
 
@@ -104,6 +111,15 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 		this.classLoader = classLoader == null ? org.springframework.util.ClassUtils.getDefaultClassLoader() : classLoader;
 	}
 
+	/* 
+	 * (non-Javadoc)
+	 * @see org.springframework.beans.factory.BeanFactoryAware#setBeanFactory(org.springframework.beans.factory.BeanFactory)
+	 */
+	@Override
+	public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
+		this.beanFactory = beanFactory;
+	}
+
 	/**
 	 * Sets the {@link EvaluationContextProvider} to be used to evaluate SpEL expressions in manually defined queries.
 	 * 
@@ -113,6 +129,17 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 	public void setEvaluationContextProvider(EvaluationContextProvider evaluationContextProvider) {
 		this.evaluationContextProvider = evaluationContextProvider == null ? DefaultEvaluationContextProvider.INSTANCE
 				: evaluationContextProvider;
+	}
+
+	/**
+	 * Configures the repository base class to use when creating the repository proxy. If not set, the factory will use
+	 * the type returned by {@link #getRepositoryBaseClass(RepositoryMetadata)} by default.
+	 * 
+	 * @param repositoryBaseClass the repository base class to back the repository proxy, can be {@literal null}.
+	 * @since 1.11
+	 */
+	public void setRepositoryBaseClass(Class<?> repositoryBaseClass) {
+		this.repositoryBaseClass = repositoryBaseClass;
 	}
 
 	/**
@@ -136,7 +163,7 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 	 */
 	public void addRepositoryProxyPostProcessor(RepositoryProxyPostProcessor processor) {
 
-		Assert.notNull(processor);
+		Assert.notNull(processor, "RepositoryProxyPostProcessor must not be null!");
 		this.postProcessors.add(processor);
 	}
 
@@ -176,6 +203,12 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 		result.setTarget(target);
 		result.setInterfaces(new Class[] { repositoryInterface, Repository.class });
 
+		result.addAdvice(ExposeInvocationInterceptor.INSTANCE);
+
+		if (TRANSACTION_PROXY_TYPE != null) {
+			result.addInterface(TRANSACTION_PROXY_TYPE);
+		}
+
 		for (RepositoryProxyPostProcessor processor : postProcessors) {
 			processor.postProcess(result, information);
 		}
@@ -192,10 +225,10 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 	/**
 	 * Returns the {@link RepositoryMetadata} for the given repository interface.
 	 * 
-	 * @param repositoryInterface
+	 * @param repositoryInterface will never be {@literal null}.
 	 * @return
 	 */
-	RepositoryMetadata getRepositoryMetadata(Class<?> repositoryInterface) {
+	protected RepositoryMetadata getRepositoryMetadata(Class<?> repositoryInterface) {
 		return AbstractRepositoryMetadata.getMetadata(repositoryInterface);
 	}
 
@@ -216,8 +249,10 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 			return repositoryInformation;
 		}
 
-		repositoryInformation = new DefaultRepositoryInformation(metadata, getRepositoryBaseClass(metadata),
-				customImplementationClass);
+		Class<?> repositoryBaseClass = this.repositoryBaseClass == null ? getRepositoryBaseClass(metadata)
+				: this.repositoryBaseClass;
+
+		repositoryInformation = new DefaultRepositoryInformation(metadata, repositoryBaseClass, customImplementationClass);
 		repositoryInformationCache.put(cacheKey, repositoryInformation);
 		return repositoryInformation;
 	}
@@ -242,7 +277,7 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 	 * @param metadata
 	 * @return
 	 */
-	protected abstract Object getTargetRepository(RepositoryMetadata metadata);
+	protected abstract Object getTargetRepository(RepositoryInformation metadata);
 
 	/**
 	 * Returns the base class backing the actual repository instance. Make sure
@@ -286,9 +321,9 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 
 		if (null == customImplementation && repositoryInformation.hasCustomMethod()) {
 
-			throw new IllegalArgumentException(String.format(
-					"You have custom methods in %s but not provided a custom implementation!",
-					repositoryInformation.getRepositoryInterface()));
+			throw new IllegalArgumentException(
+					String.format("You have custom methods in %s but not provided a custom implementation!",
+							repositoryInformation.getRepositoryInterface()));
 		}
 
 		validate(repositoryInformation);
@@ -296,6 +331,52 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 
 	protected void validate(RepositoryMetadata repositoryMetadata) {
 
+	}
+
+	/**
+	 * Creates a repository of the repository base class defined in the given {@link RepositoryInformation} using
+	 * reflection.
+	 * 
+	 * @param information
+	 * @param constructorArguments
+	 * @return
+	 */
+	@SuppressWarnings("unchecked")
+	protected final <R> R getTargetRepositoryViaReflection(RepositoryInformation information,
+			Object... constructorArguments) {
+
+		Class<?> baseClass = information.getRepositoryBaseClass();
+		Constructor<?> constructor = ReflectionUtils.findConstructor(baseClass, constructorArguments);
+
+		if (constructor == null) {
+
+			List<Class<?>> argumentTypes = new ArrayList<Class<?>>(constructorArguments.length);
+
+			for (Object argument : constructorArguments) {
+				argumentTypes.add(argument.getClass());
+			}
+
+			throw new IllegalStateException(String.format(
+					"No suitable constructor found on %s to match the given arguments: %s. Make sure you implement a constructor taking these",
+					baseClass, argumentTypes));
+		}
+
+		return (R) BeanUtils.instantiateClass(constructor, constructorArguments);
+	}
+
+	/**
+	 * Returns the TransactionProxy type or {@literal null} if not on the classpath.
+	 * 
+	 * @return
+	 */
+	private static Class<?> getTransactionProxyType() {
+
+		try {
+			return org.springframework.util.ClassUtils
+					.forName("org.springframework.transaction.interceptor.TransactionalProxy", null);
+		} catch (ClassNotFoundException o_O) {
+			return null;
+		}
 	}
 
 	/**
@@ -345,8 +426,14 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 				return;
 			}
 
+			SpelAwareProxyProjectionFactory factory = new SpelAwareProxyProjectionFactory();
+			factory.setBeanClassLoader(classLoader);
+			factory.setBeanFactory(beanFactory);
+
 			for (Method method : queryMethods) {
-				RepositoryQuery query = lookupStrategy.resolveQuery(method, repositoryInformation, namedQueries);
+
+				RepositoryQuery query = lookupStrategy.resolveQuery(method, repositoryInformation, factory, namedQueries);
+
 				invokeListeners(query);
 				queries.put(method, query);
 			}
@@ -386,8 +473,8 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 			Object[] arguments = invocation.getArguments();
 
 			if (isCustomMethodInvocation(invocation)) {
+
 				Method actualMethod = repositoryInformation.getTargetClassMethod(method);
-				makeAccessible(actualMethod);
 				return executeMethodOn(customImplementation, actualMethod, arguments);
 			}
 
@@ -445,53 +532,6 @@ public abstract class RepositoryFactorySupport implements BeanClassLoaderAware {
 			}
 
 			return repositoryInformation.isCustomMethod(invocation.getMethod());
-		}
-	}
-
-	/**
-	 * Method interceptor to invoke default methods on the repository proxy.
-	 *
-	 * @author Oliver Gierke
-	 */
-	private static class DefaultMethodInvokingMethodInterceptor implements MethodInterceptor {
-
-		private final Constructor<MethodHandles.Lookup> constructor;
-
-		/**
-		 * Creates a new {@link DefaultMethodInvokingMethodInterceptor}.
-		 */
-		public DefaultMethodInvokingMethodInterceptor() {
-
-			try {
-				this.constructor = MethodHandles.Lookup.class.getDeclaredConstructor(Class.class, int.class);
-
-				if (!constructor.isAccessible()) {
-					constructor.setAccessible(true);
-				}
-			} catch (Exception o_O) {
-				throw new IllegalStateException(o_O);
-			}
-		}
-
-		/* 
-		 * (non-Javadoc)
-		 * @see org.aopalliance.intercept.MethodInterceptor#invoke(org.aopalliance.intercept.MethodInvocation)
-		 */
-		@Override
-		public Object invoke(MethodInvocation invocation) throws Throwable {
-
-			Method method = invocation.getMethod();
-
-			if (!org.springframework.data.util.ReflectionUtils.isDefaultMethod(method)) {
-				return invocation.proceed();
-			}
-
-			Object[] arguments = invocation.getArguments();
-			Class<?> declaringClass = method.getDeclaringClass();
-			Object proxy = ((ProxyMethodInvocation) invocation).getProxy();
-
-			return constructor.newInstance(declaringClass, MethodHandles.Lookup.PRIVATE)
-					.unreflectSpecial(method, declaringClass).bindTo(proxy).invokeWithArguments(arguments);
 		}
 	}
 

@@ -106,7 +106,7 @@ public class ClassTypeInformationUnitTests {
 
 		property = information.getProperty("rawSet");
 		assertEquals(Set.class, property.getType());
-		assertThat(property.getComponentType().getType(), is(Matchers.<Class<?>> equalTo(Object.class)));
+		assertThat(property.getComponentType().getType(), is(Matchers.<Class<?>>equalTo(Object.class)));
 		assertNull(property.getMapValueType());
 	}
 
@@ -224,8 +224,8 @@ public class ClassTypeInformationUnitTests {
 		assertThat(parameterType.isAssignableFrom(stringInfo), is(true));
 		assertThat(stringInfo.getSuperTypeInformation(GenericInterface.class), is((Object) parameterType));
 		assertThat(parameterType.isAssignableFrom(from(LongImplementation.class)), is(false));
-		assertThat(parameterType.isAssignableFrom(from(StringImplementation.class).getSuperTypeInformation(
-				GenericInterface.class)), is(true));
+		assertThat(parameterType
+				.isAssignableFrom(from(StringImplementation.class).getSuperTypeInformation(GenericInterface.class)), is(true));
 	}
 
 	@Test
@@ -238,8 +238,8 @@ public class ClassTypeInformationUnitTests {
 
 		assertThat(parameterType.isAssignableFrom(from(StringImplementation.class)), is(false));
 		assertThat(parameterType.isAssignableFrom(from(LongImplementation.class)), is(true));
-		assertThat(parameterType.isAssignableFrom(from(StringImplementation.class).getSuperTypeInformation(
-				GenericInterface.class)), is(false));
+		assertThat(parameterType
+				.isAssignableFrom(from(StringImplementation.class).getSuperTypeInformation(GenericInterface.class)), is(false));
 	}
 
 	@Test
@@ -252,8 +252,8 @@ public class ClassTypeInformationUnitTests {
 
 		assertThat(parameterType.isAssignableFrom(from(StringImplementation.class)), is(false));
 		assertThat(parameterType.isAssignableFrom(from(LongImplementation.class)), is(true));
-		assertThat(parameterType.isAssignableFrom(from(StringImplementation.class).getSuperTypeInformation(
-				GenericInterface.class)), is(false));
+		assertThat(parameterType
+				.isAssignableFrom(from(StringImplementation.class).getSuperTypeInformation(GenericInterface.class)), is(false));
 	}
 
 	@Test
@@ -351,6 +351,66 @@ public class ClassTypeInformationUnitTests {
 		TypeInformation<?> leafType = customer.getProperty("intermediate.content.intermediate.content");
 
 		assertThat(leafType.getType(), is((Object) Leaf.class));
+	}
+
+	/**
+	 * @see DATACMNS-783
+	 * @see DATACMNS-853
+	 */
+	@Test
+	public void specializesTypeUsingTypeVariableContext() {
+
+		ClassTypeInformation<Foo> root = ClassTypeInformation.from(Foo.class);
+		TypeInformation<?> property = root.getProperty("abstractBar");
+
+		TypeInformation<?> specialized = property.specialize(ClassTypeInformation.from(Bar.class));
+
+		assertThat(specialized.getType(), is((Object) Bar.class));
+		assertThat(specialized.getProperty("field").getType(), is((Object) Character.class));
+		assertThat(specialized.getProperty("anotherField").getType(), is((Object) Integer.class));
+	}
+
+	/**
+	 * @see DATACMNS-783
+	 */
+	@Test
+	@SuppressWarnings("rawtypes")
+	public void usesTargetTypeDirectlyIfNoGenericsAreInvolved() {
+
+		ClassTypeInformation<Foo> root = ClassTypeInformation.from(Foo.class);
+		TypeInformation<?> property = root.getProperty("object");
+
+		ClassTypeInformation<?> from = ClassTypeInformation.from(Bar.class);
+		assertThat(property.specialize(from), is((TypeInformation) from));
+	}
+
+	/**
+	 * @see DATACMNS-855
+	 */
+	@Test
+	@SuppressWarnings("rawtypes")
+	public void specializedTypeEqualsAndHashCode() {
+
+		ClassTypeInformation<Foo> root = ClassTypeInformation.from(Foo.class);
+		TypeInformation<?> property = root.getProperty("abstractBar");
+
+		TypeInformation left = property.specialize(ClassTypeInformation.from(Bar.class));
+		TypeInformation right = property.specialize(ClassTypeInformation.from(Bar.class));
+
+		assertThat(left, is(right));
+		assertThat(right, is(left));
+		assertThat(left.hashCode(), is(right.hashCode()));
+	}
+
+	/**
+	 * @see DATACMNS-896
+	 */
+	@Test
+	public void prefersLocalTypeMappingOverNestedWithSameGenericType() {
+
+		ClassTypeInformation<Concrete> information = ClassTypeInformation.from(Concrete.class);
+
+		assertThat(information.getProperty("field").getType(), is(typeCompatibleWith(Nested.class)));
 	}
 
 	static class StringMapContainer extends MapContainer<String> {
@@ -527,4 +587,28 @@ public class ClassTypeInformationUnitTests {
 	static class ConcreteInnerIntermediate extends GenericInnerIntermediate<Leaf> {}
 
 	static class Leaf {}
+
+	static class TypeWithAbstractGenericType<T, S> {
+		AbstractBar<T, S> abstractBar;
+		Object object;
+	}
+
+	static class Foo extends TypeWithAbstractGenericType<Character, Integer> {}
+
+	static abstract class AbstractBar<T, S> {}
+
+	static class Bar<T, S> extends AbstractBar<T, S> {
+		T field;
+		S anotherField;
+	}
+
+	// DATACMNS-896
+
+	static class SomeType<T> {
+		T field;
+	}
+
+	static class Nested extends SomeType<String> {}
+
+	static class Concrete extends SomeType<Nested> {}
 }

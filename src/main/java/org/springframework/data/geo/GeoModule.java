@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 the original author or authors.
+ * Copyright 2014-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,14 @@ package org.springframework.data.geo;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.Version;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 
 /**
- * Jackson 2 Module to deserialize
+ * Custom module to deserialize the geo-spatial value objects using Jackson 2.
  * 
  * @author Oliver Gierke
  * @since 1.8
@@ -47,6 +48,7 @@ public class GeoModule extends SimpleModule {
 		setMixInAnnotation(Polygon.class, PolygonMixin.class);
 	}
 
+	@JsonIgnoreProperties("unit")
 	static abstract class DistanceMixin {
 
 		DistanceMixin(@JsonProperty("value") double value,

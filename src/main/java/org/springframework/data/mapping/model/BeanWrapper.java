@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 by the original author(s).
+ * Copyright 2011-2015 by the original author(s).
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package org.springframework.data.mapping.model;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-import org.springframework.core.convert.ConversionService;
 import org.springframework.data.mapping.PersistentProperty;
 import org.springframework.data.mapping.PersistentPropertyAccessor;
 import org.springframework.util.Assert;
@@ -29,23 +28,9 @@ import org.springframework.util.ReflectionUtils;
  * 
  * @author Oliver Gierke
  */
-public class BeanWrapper<T> implements PersistentPropertyAccessor {
+class BeanWrapper<T> implements PersistentPropertyAccessor {
 
 	private final T bean;
-
-	/**
-	 * Creates a new {@link BeanWrapper} for the given bean and {@link ConversionService}.TODO: remove!
-	 * 
-	 * @param bean must not be {@literal null}.
-	 * @param conversionService can be {@literal null}.
-	 * @return
-	 * @deprecated use {@link org.springframework.data.mapping.PersistentEntity#getPropertyAccessor(Object)} instead. Will
-	 *             be removed in 1.10 RC1.
-	 */
-	@Deprecated
-	public static <T> BeanWrapper<T> create(T bean, ConversionService conversionService) {
-		return new BeanWrapper<T>(bean);
-	}
 
 	/**
 	 * Creates a new {@link BeanWrapper} for the given bean.
@@ -66,16 +51,18 @@ public class BeanWrapper<T> implements PersistentPropertyAccessor {
 
 		Assert.notNull(property, "PersistentProperty must not be null!");
 
-		Method setter = property.getSetter();
-
 		try {
 
 			if (!property.usePropertyAccess()) {
 
 				ReflectionUtils.makeAccessible(property.getField());
 				ReflectionUtils.setField(property.getField(), bean, value);
+				return;
+			}
 
-			} else if (property.usePropertyAccess() && setter != null) {
+			Method setter = property.getSetter();
+
+			if (property.usePropertyAccess() && setter != null) {
 
 				ReflectionUtils.makeAccessible(setter);
 				ReflectionUtils.invokeMethod(setter, bean, value);
@@ -110,25 +97,26 @@ public class BeanWrapper<T> implements PersistentPropertyAccessor {
 
 		try {
 
-			Method getter = property.getGetter();
-
 			if (!property.usePropertyAccess()) {
 
 				Field field = property.getField();
 				ReflectionUtils.makeAccessible(field);
 				return (S) ReflectionUtils.getField(field, bean);
+			}
 
-			} else if (property.usePropertyAccess() && getter != null) {
+			Method getter = property.getGetter();
+
+			if (property.usePropertyAccess() && getter != null) {
 
 				ReflectionUtils.makeAccessible(getter);
 				return (S) ReflectionUtils.invokeMethod(getter, bean);
-			} else {
-				return null;
 			}
 
+			return null;
+
 		} catch (IllegalStateException e) {
-			throw new MappingException(String.format("Could not read property %s of %s!", property.toString(),
-					bean.toString()), e);
+			throw new MappingException(
+					String.format("Could not read property %s of %s!", property.toString(), bean.toString()), e);
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -198,6 +198,76 @@ public class PageableHandlerMethodArgumentResolverUnitTests extends PageableDefa
 
 		assertThat(resolver.resolveArgument(supportedMethodParameter, null, new ServletWebRequest(request), null),
 				is(nullValue()));
+	}
+
+	/**
+	 * @see DATACMNS-563
+	 */
+	@Test
+	public void considersOneIndexedParametersSetting() {
+
+		PageableHandlerMethodArgumentResolver resolver = getResolver();
+		resolver.setOneIndexedParameters(true);
+
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		request.addParameter("page", "1");
+
+		assertThat(resolver.resolveArgument(supportedMethodParameter, null, new ServletWebRequest(request), null)
+				.getPageNumber(), is(0));
+	}
+
+	/**
+	 * @see DATACMNS-640
+	 */
+	@Test
+	public void usesNullSortIfNoDefaultIsConfiguredAndPageAndSizeAreGiven() {
+
+		PageableHandlerMethodArgumentResolver resolver = getResolver();
+		resolver.setFallbackPageable(null);
+
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		request.addParameter("page", "0");
+		request.addParameter("size", "10");
+
+		Pageable result = resolver.resolveArgument(supportedMethodParameter, null, new ServletWebRequest(request), null);
+
+		assertThat(result.getPageNumber(), is(0));
+		assertThat(result.getPageSize(), is(10));
+		assertThat(result.getSort(), is(nullValue()));
+	}
+
+	/**
+	 * @see DATACMNS-692
+	 */
+	@Test
+	public void oneIndexedParametersDefaultsIndexOutOfRange() {
+
+		PageableHandlerMethodArgumentResolver resolver = getResolver();
+		resolver.setOneIndexedParameters(true);
+
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		request.addParameter("page", "0");
+
+		Pageable result = resolver.resolveArgument(supportedMethodParameter, null, new ServletWebRequest(request), null);
+
+		assertThat(result.getPageNumber(), is(0));
+	}
+
+	/**
+	 * @see DATACMNS-761
+	 */
+	@Test
+	public void returnsCorrectPageSizeForOneIndexParameters() {
+
+		PageableHandlerMethodArgumentResolver resolver = getResolver();
+		resolver.setOneIndexedParameters(true);
+
+		MockHttpServletRequest request = new MockHttpServletRequest();
+		request.addParameter("size", "10");
+
+		Pageable result = resolver.resolveArgument(supportedMethodParameter, null, new ServletWebRequest(request), null);
+
+		assertThat(result.getPageSize(), is(10));
 	}
 
 	@Override

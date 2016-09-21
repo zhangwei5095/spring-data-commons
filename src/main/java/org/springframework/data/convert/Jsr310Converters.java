@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,13 @@ import static java.time.Instant.*;
 import static java.time.LocalDateTime.*;
 import static java.time.ZoneId.*;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
@@ -59,11 +62,25 @@ public abstract class Jsr310Converters {
 		converters.add(LocalDateToDateConverter.INSTANCE);
 		converters.add(DateToLocalTimeConverter.INSTANCE);
 		converters.add(LocalTimeToDateConverter.INSTANCE);
+		converters.add(DateToInstantConverter.INSTANCE);
+		converters.add(InstantToDateConverter.INSTANCE);
+		converters.add(ZoneIdToStringConverter.INSTANCE);
+		converters.add(StringToZoneIdConverter.INSTANCE);
 
 		return converters;
 	}
 
-	static enum DateToLocalDateTimeConverter implements Converter<Date, LocalDateTime> {
+	public static boolean supports(Class<?> type) {
+
+		if (!JAVA_8_IS_PRESENT) {
+			return false;
+		}
+
+		return Arrays.<Class<?>> asList(LocalDateTime.class, LocalDate.class, LocalTime.class, Instant.class)
+				.contains(type);
+	}
+
+	public static enum DateToLocalDateTimeConverter implements Converter<Date, LocalDateTime> {
 
 		INSTANCE;
 
@@ -73,7 +90,7 @@ public abstract class Jsr310Converters {
 		}
 	}
 
-	static enum LocalDateTimeToDateConverter implements Converter<LocalDateTime, Date> {
+	public static enum LocalDateTimeToDateConverter implements Converter<LocalDateTime, Date> {
 
 		INSTANCE;
 
@@ -83,7 +100,7 @@ public abstract class Jsr310Converters {
 		}
 	}
 
-	static enum DateToLocalDateConverter implements Converter<Date, LocalDate> {
+	public static enum DateToLocalDateConverter implements Converter<Date, LocalDate> {
 
 		INSTANCE;
 
@@ -93,7 +110,7 @@ public abstract class Jsr310Converters {
 		}
 	}
 
-	static enum LocalDateToDateConverter implements Converter<LocalDate, Date> {
+	public static enum LocalDateToDateConverter implements Converter<LocalDate, Date> {
 
 		INSTANCE;
 
@@ -103,7 +120,7 @@ public abstract class Jsr310Converters {
 		}
 	}
 
-	static enum DateToLocalTimeConverter implements Converter<Date, LocalTime> {
+	public static enum DateToLocalTimeConverter implements Converter<Date, LocalTime> {
 
 		INSTANCE;
 
@@ -113,13 +130,55 @@ public abstract class Jsr310Converters {
 		}
 	}
 
-	static enum LocalTimeToDateConverter implements Converter<LocalTime, Date> {
+	public static enum LocalTimeToDateConverter implements Converter<LocalTime, Date> {
 
 		INSTANCE;
 
 		@Override
 		public Date convert(LocalTime source) {
 			return source == null ? null : Date.from(source.atDate(LocalDate.now()).atZone(systemDefault()).toInstant());
+		}
+	}
+
+	public static enum DateToInstantConverter implements Converter<Date, Instant> {
+
+		INSTANCE;
+
+		@Override
+		public Instant convert(Date source) {
+			return source == null ? null : source.toInstant();
+		}
+	}
+
+	public static enum InstantToDateConverter implements Converter<Instant, Date> {
+
+		INSTANCE;
+
+		@Override
+		public Date convert(Instant source) {
+			return source == null ? null : Date.from(source.atZone(systemDefault()).toInstant());
+		}
+	}
+
+	@WritingConverter
+	public static enum ZoneIdToStringConverter implements Converter<ZoneId, String> {
+
+		INSTANCE;
+
+		@Override
+		public String convert(ZoneId source) {
+			return source.toString();
+		}
+	}
+
+	@ReadingConverter
+	public static enum StringToZoneIdConverter implements Converter<String, ZoneId> {
+
+		INSTANCE;
+
+		@Override
+		public ZoneId convert(String source) {
+			return ZoneId.of(source);
 		}
 	}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@ package org.springframework.data.querydsl;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 
-import com.mysema.query.types.OrderSpecifier;
-import com.mysema.query.types.Predicate;
+import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.Predicate;
 
 /**
  * Interface to allow execution of QueryDsl {@link Predicate} instances.
@@ -47,6 +48,17 @@ public interface QueryDslPredicateExecutor<T> {
 	 * @return all entities matching the given {@link Predicate}.
 	 */
 	Iterable<T> findAll(Predicate predicate);
+
+	/**
+	 * Returns all entities matching the given {@link Predicate} applying the given {@link Sort}. In case no match could
+	 * be found an empty {@link Iterable} is returned.
+	 * 
+	 * @param predicate can be {@literal null}.
+	 * @param sort the {@link Sort} specification to sort the results by, must not be {@literal null}.
+	 * @return all entities matching the given {@link Predicate}.
+	 * @since 1.10
+	 */
+	Iterable<T> findAll(Predicate predicate, Sort sort);
 
 	/**
 	 * Returns all entities matching the given {@link Predicate} applying the given {@link OrderSpecifier}s. In case no
@@ -83,4 +95,12 @@ public interface QueryDslPredicateExecutor<T> {
 	 * @return the number of instances matching the {@link Predicate}.
 	 */
 	long count(Predicate predicate);
+
+	/**
+	 * Checks whether the data store contains elements that match the given {@link Predicate}.
+	 *
+	 * @param predicate the {@link Predicate} to use for the existance check, can be {@literal null}.
+	 * @return {@literal true} if the data store contains elements that match the given {@link Predicate}.
+	 */
+	boolean exists(Predicate predicate);
 }

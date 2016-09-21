@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 the original author or authors.
+ * Copyright 2012-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,15 +18,17 @@ package org.springframework.data.util;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
 
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.util.Assert;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.ReflectionUtils.FieldCallback;
 
 /**
- * A {@link FieldCallback} that will inspect each field for a given annotation. Thie fields type can then be accessed
+ * A {@link FieldCallback} that will inspect each field for a given annotation. This field's type can then be accessed
  * afterwards.
  * 
  * @author Oliver Gierke
+ * @author Christoph Strobl
  */
 public class AnnotationDetectionFieldCallback implements FieldCallback {
 
@@ -54,9 +56,12 @@ public class AnnotationDetectionFieldCallback implements FieldCallback {
 			return;
 		}
 
-		Annotation annotation = field.getAnnotation(annotationType);
+		Annotation annotation = AnnotatedElementUtils.findMergedAnnotation(field, annotationType);
+
 		if (annotation != null) {
+
 			this.field = field;
+			ReflectionUtils.makeAccessible(this.field);
 		}
 	}
 

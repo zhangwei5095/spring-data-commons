@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,16 @@ package org.springframework.data.mapping.model;
 
 import static org.hamcrest.CoreMatchers.*;
 import static org.junit.Assert.*;
+import static org.junit.Assume.*;
 import static org.mockito.Mockito.*;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.Comparator;
 import java.util.Iterator;
-import java.util.SortedSet;
+import java.util.List;
 
+import org.hamcrest.CoreMatchers;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -30,6 +34,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.runners.MockitoJUnitRunner;
+import org.springframework.core.annotation.AliasFor;
 import org.springframework.data.annotation.CreatedBy;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedBy;
@@ -46,7 +51,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Unit test for {@link BasicPersistentEntity}.
- * 
+ *
  * @author Oliver Gierke
  * @author Christoph Strobl
  */
@@ -55,7 +60,7 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 
 	@Rule public ExpectedException exception = ExpectedException.none();
 
-	@Mock T property;
+	@Mock T property, anotherProperty;
 
 	@Test
 	public void assertInvariants() {
@@ -111,8 +116,9 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 		entity.addPersistentProperty(lastName);
 		entity.addPersistentProperty(firstName);
 		entity.addPersistentProperty(ssn);
+		entity.verify();
 
-		SortedSet<T> properties = (SortedSet<T>) ReflectionTestUtils.getField(entity, "properties");
+		List<T> properties = (List<T>) ReflectionTestUtils.getField(entity, "properties");
 
 		assertThat(properties.size(), is(3));
 		Iterator<T> iterator = properties.iterator();
@@ -144,10 +150,11 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 		MutablePersistentEntity<Person, T> entity = createEntity(Person.class);
 
 		when(property.isIdProperty()).thenReturn(true);
+		when(anotherProperty.isIdProperty()).thenReturn(true);
 
 		entity.addPersistentProperty(property);
 		exception.expect(MappingException.class);
-		entity.addPersistentProperty(property);
+		entity.addPersistentProperty(anotherProperty);
 	}
 
 	/**
@@ -176,6 +183,8 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 	@Test
 	public void returnsBeanWrapperForPropertyAccessor() {
 
+		assumeThat(System.getProperty("java.version"), CoreMatchers.startsWith("1.6"));
+
 		SampleMappingContext context = new SampleMappingContext();
 		PersistentEntity<Object, SamplePersistentProperty> entity = context.getPersistentEntity(Entity.class);
 
@@ -183,6 +192,25 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 		PersistentPropertyAccessor accessor = entity.getPropertyAccessor(value);
 
 		assertThat(accessor, is(instanceOf(BeanWrapper.class)));
+		assertThat(accessor.getBean(), is((Object) value));
+	}
+
+	/**
+	 * @see DATACMNS-809
+	 */
+	@Test
+	public void returnsGeneratedPropertyAccessorForPropertyAccessor() {
+
+		assumeThat(System.getProperty("java.version"), not(CoreMatchers.startsWith("1.6")));
+
+		SampleMappingContext context = new SampleMappingContext();
+		PersistentEntity<Object, SamplePersistentProperty> entity = context.getPersistentEntity(Entity.class);
+
+		Entity value = new Entity();
+		PersistentPropertyAccessor accessor = entity.getPropertyAccessor(value);
+
+		assertThat(accessor, is(not(instanceOf(BeanWrapper.class))));
+		assertThat(accessor.getClass().getName(), containsString("_Accessor_"));
 		assertThat(accessor.getBean(), is((Object) value));
 	}
 
@@ -222,6 +250,31 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 		assertThat(entity.getPropertyAccessor(new Subtype()), is(notNullValue()));
 	}
 
+	/**
+	 * @see DATACMNS-825
+	 */
+	@Test
+	public void returnsTypeAliasIfAnnotatedUsingComposedAnnotation() {
+
+		PersistentEntity<AliasEntityUsingComposedAnnotation, T> entity = createEntity(
+				AliasEntityUsingComposedAnnotation.class);
+		assertThat(entity.getTypeAlias(), is((Object) "bar"));
+	}
+
+	/**
+	 * @see DATACMNS-866
+	 */
+	@Test
+	public void invalidBeanAccessCreatesDescriptiveErrorMessage() {
+
+		PersistentEntity<Entity, T> entity = createEntity(Entity.class);
+
+		exception.expectMessage(Entity.class.getName());
+		exception.expectMessage(Object.class.getName());
+
+		entity.getPropertyAccessor(new Object());
+	}
+
 	private <S> BasicPersistentEntity<S, T> createEntity(Class<S> type) {
 		return createEntity(type, null);
 	}
@@ -248,6 +301,17 @@ public class BasicPersistentEntityUnitTests<T extends PersistentProperty<T>> {
 			return property;
 		}
 	}
+
+	@Retention(RetentionPolicy.RUNTIME)
+	@TypeAlias("foo")
+	static @interface ComposedTypeAlias {
+
+		@AliasFor(annotation = TypeAlias.class, attribute = "value")
+		String name() default "bar";
+	}
+
+	@ComposedTypeAlias
+	static class AliasEntityUsingComposedAnnotation {}
 
 	static class Subtype extends Entity {}
 }

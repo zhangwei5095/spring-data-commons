@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2014 the original author or authors.
+ * Copyright 2008-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,10 @@ package org.springframework.data.repository.core.support;
 import java.io.Serializable;
 import java.util.List;
 
+import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanClassLoaderAware;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
 import org.springframework.beans.factory.FactoryBean;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Required;
@@ -29,11 +32,11 @@ import org.springframework.data.repository.core.EntityInformation;
 import org.springframework.data.repository.core.NamedQueries;
 import org.springframework.data.repository.core.RepositoryInformation;
 import org.springframework.data.repository.core.RepositoryMetadata;
+import org.springframework.data.repository.query.DefaultEvaluationContextProvider;
 import org.springframework.data.repository.query.EvaluationContextProvider;
 import org.springframework.data.repository.query.QueryLookupStrategy;
 import org.springframework.data.repository.query.QueryLookupStrategy.Key;
 import org.springframework.data.repository.query.QueryMethod;
-import org.springframework.data.repository.query.DefaultEvaluationContextProvider;
 import org.springframework.util.Assert;
 
 /**
@@ -45,16 +48,18 @@ import org.springframework.util.Assert;
  * @author Thomas Darimont
  */
 public abstract class RepositoryFactoryBeanSupport<T extends Repository<S, ID>, S, ID extends Serializable> implements
-		InitializingBean, RepositoryFactoryInformation<S, ID>, FactoryBean<T>, BeanClassLoaderAware {
+		InitializingBean, RepositoryFactoryInformation<S, ID>, FactoryBean<T>, BeanClassLoaderAware, BeanFactoryAware {
 
 	private RepositoryFactorySupport factory;
 
 	private Key queryLookupStrategyKey;
 	private Class<? extends T> repositoryInterface;
+	private Class<?> repositoryBaseClass;
 	private Object customImplementation;
 	private NamedQueries namedQueries;
 	private MappingContext<?, ?> mappingContext;
 	private ClassLoader classLoader;
+	private BeanFactory beanFactory;
 	private boolean lazyInit = false;
 	private EvaluationContextProvider evaluationContextProvider = DefaultEvaluationContextProvider.INSTANCE;
 
@@ -72,6 +77,16 @@ public abstract class RepositoryFactoryBeanSupport<T extends Repository<S, ID>, 
 
 		Assert.notNull(repositoryInterface);
 		this.repositoryInterface = repositoryInterface;
+	}
+
+	/**
+	 * Configures the repository base class to be used.
+	 * 
+	 * @param repositoryBaseClass the repositoryBaseClass to set, can be {@literal null}.
+	 * @since 1.11
+	 */
+	public void setRepositoryBaseClass(Class<?> repositoryBaseClass) {
+		this.repositoryBaseClass = repositoryBaseClass;
 	}
 
 	/**
@@ -140,6 +155,16 @@ public abstract class RepositoryFactoryBeanSupport<T extends Repository<S, ID>, 
 		this.classLoader = classLoader;
 	}
 
+	/* 
+	 * (non-Javadoc)
+	 * @see org.springframework.beans.factory.BeanFactoryAware#setBeanFactory(org.springframework.beans.factory.BeanFactory)
+	 */
+	@Override
+	public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
+		this.beanFactory = beanFactory;
+
+	}
+
 	/*
 	 * (non-Javadoc)
 	 * @see org.springframework.data.repository.core.support.RepositoryFactoryInformation#getEntityInformation()
@@ -156,8 +181,8 @@ public abstract class RepositoryFactoryBeanSupport<T extends Repository<S, ID>, 
 	 */
 	public RepositoryInformation getRepositoryInformation() {
 
-		return this.factory.getRepositoryInformation(repositoryMetadata, customImplementation == null ? null
-				: customImplementation.getClass());
+		return this.factory.getRepositoryInformation(repositoryMetadata,
+				customImplementation == null ? null : customImplementation.getClass());
 	}
 
 	/* 
@@ -216,8 +241,10 @@ public abstract class RepositoryFactoryBeanSupport<T extends Repository<S, ID>, 
 		this.factory = createRepositoryFactory();
 		this.factory.setQueryLookupStrategyKey(queryLookupStrategyKey);
 		this.factory.setNamedQueries(namedQueries);
-		this.factory.setBeanClassLoader(classLoader);
 		this.factory.setEvaluationContextProvider(evaluationContextProvider);
+		this.factory.setRepositoryBaseClass(repositoryBaseClass);
+		this.factory.setBeanClassLoader(classLoader);
+		this.factory.setBeanFactory(beanFactory);
 
 		this.repositoryMetadata = this.factory.getRepositoryMetadata(repositoryInterface);
 

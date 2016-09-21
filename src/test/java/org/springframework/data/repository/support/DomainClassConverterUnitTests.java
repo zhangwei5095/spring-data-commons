@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2014 the original author or authors.
+ * Copyright 2008-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@ import static org.junit.Assert.*;
 import static org.mockito.Matchers.*;
 import static org.mockito.Mockito.*;
 
+import java.lang.reflect.Method;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -30,10 +32,14 @@ import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.GenericApplicationContext;
+import org.springframework.core.MethodParameter;
 import org.springframework.core.convert.TypeDescriptor;
 import org.springframework.core.convert.support.DefaultConversionService;
 import org.springframework.data.repository.CrudRepository;
 import org.springframework.data.repository.core.support.DummyRepositoryFactoryBean;
+import org.springframework.data.repository.support.DomainClassConverter.ToIdConverter;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.bind.annotation.ModelAttribute;
 
 /**
  * Unit test for {@link DomainClassConverter}.
@@ -45,22 +51,19 @@ import org.springframework.data.repository.core.support.DummyRepositoryFactoryBe
 public class DomainClassConverterUnitTests {
 
 	static final User USER = new User();
+	static final TypeDescriptor STRING_TYPE = TypeDescriptor.valueOf(String.class);
+	static final TypeDescriptor USER_TYPE = TypeDescriptor.valueOf(User.class);
+	static final TypeDescriptor SUB_USER_TYPE = TypeDescriptor.valueOf(SubUser.class);
+	static final TypeDescriptor LONG_TYPE = TypeDescriptor.valueOf(Long.class);
 
 	@SuppressWarnings("rawtypes") DomainClassConverter converter;
-
-	TypeDescriptor sourceDescriptor;
-	TypeDescriptor targetDescriptor;
 
 	@Mock DefaultConversionService service;
 
 	@Before
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	public void setUp() {
-
 		converter = new DomainClassConverter(service);
-
-		sourceDescriptor = TypeDescriptor.valueOf(String.class);
-		targetDescriptor = TypeDescriptor.valueOf(User.class);
 	}
 
 	@Test
@@ -96,19 +99,19 @@ public class DomainClassConverterUnitTests {
 	 * @see DATACMNS-233
 	 */
 	public void returnsNullForNullSource() {
-		assertThat(converter.convert(null, sourceDescriptor, targetDescriptor), is(nullValue()));
+		assertThat(converter.convert(null, STRING_TYPE, USER_TYPE), is(nullValue()));
 	}
 
 	/**
 	 * @see DATACMNS-233
 	 */
 	public void returnsNullForEmptyStringSource() {
-		assertThat(converter.convert("", sourceDescriptor, targetDescriptor), is(nullValue()));
+		assertThat(converter.convert("", STRING_TYPE, USER_TYPE), is(nullValue()));
 	}
 
 	private void assertMatches(boolean matchExpected) {
 
-		assertThat(converter.matches(sourceDescriptor, targetDescriptor), is(matchExpected));
+		assertThat(converter.matches(STRING_TYPE, USER_TYPE), is(matchExpected));
 	}
 
 	@Test
@@ -120,7 +123,7 @@ public class DomainClassConverterUnitTests {
 		when(service.canConvert(String.class, Long.class)).thenReturn(true);
 		when(service.convert(anyString(), eq(Long.class))).thenReturn(1L);
 
-		converter.convert("1", sourceDescriptor, targetDescriptor);
+		converter.convert("1", STRING_TYPE, USER_TYPE);
 
 		UserRepository bean = context.getBean(UserRepository.class);
 		UserRepository repo = (UserRepository) ((Advised) bean).getTargetSource().getTarget();
@@ -141,20 +144,71 @@ public class DomainClassConverterUnitTests {
 		when(service.canConvert(String.class, Long.class)).thenReturn(true);
 
 		converter.setApplicationContext(context);
-		assertThat(converter.matches(sourceDescriptor, targetDescriptor), is(true));
+		assertThat(converter.matches(STRING_TYPE, USER_TYPE), is(true));
 	}
 
 	/**
-	 * @DATACMNS-583
+	 * @see DATACMNS-583
 	 */
 	@Test
-	public void shouldReturnSourceObjectIfSourceAndTargetTypesAreTheSame() {
+	public void converterDoesntMatchIfTargetTypeIsAssignableFromSource() {
 
-		ApplicationContext context = initContextWithRepo();
-		converter.setApplicationContext(context);
+		converter.setApplicationContext(initContextWithRepo());
 
-		assertThat(converter.matches(targetDescriptor, targetDescriptor), is(true));
-		assertThat((User) converter.convert(USER, targetDescriptor, targetDescriptor), is(USER));
+		assertThat(converter.matches(SUB_USER_TYPE, USER_TYPE), is(false));
+		assertThat((User) converter.convert(USER, USER_TYPE, USER_TYPE), is(USER));
+	}
+
+	/**
+	 * @see DATACMNS-627
+	 */
+	@Test
+	public void supportsConversionFromIdType() {
+
+		converter.setApplicationContext(initContextWithRepo());
+
+		assertThat(converter.matches(LONG_TYPE, USER_TYPE), is(true));
+	}
+
+	/**
+	 * @see DATACMNS-627
+	 */
+	@Test
+	public void supportsConversionFromEntityToIdType() {
+
+		converter.setApplicationContext(initContextWithRepo());
+
+		assertThat(converter.matches(USER_TYPE, LONG_TYPE), is(true));
+	}
+
+	/**
+	 * @see DATACMNS-627
+	 */
+	@Test
+	public void supportsConversionFromEntityToString() {
+
+		converter.setApplicationContext(initContextWithRepo());
+
+		when(service.canConvert(Long.class, String.class)).thenReturn(true);
+		assertThat(converter.matches(USER_TYPE, STRING_TYPE), is(true));
+	}
+
+	/**
+	 * @see DATACMNS-683
+	 */
+	@Test
+	public void toIdConverterDoesNotMatchIfTargetTypeIsAssignableFromSource() throws Exception {
+
+		converter.setApplicationContext(initContextWithRepo());
+
+		@SuppressWarnings("rawtypes")
+		DomainClassConverter.ToIdConverter toIdConverter = (ToIdConverter) ReflectionTestUtils.getField(converter,
+				"toIdConverter");
+
+		Method method = Wrapper.class.getMethod("foo", User.class);
+		TypeDescriptor target = TypeDescriptor.nested(new MethodParameter(method, 0), 0);
+
+		assertThat(toIdConverter.matches(SUB_USER_TYPE, target), is(false));
 	}
 
 	private ApplicationContext initContextWithRepo() {
@@ -170,9 +224,16 @@ public class DomainClassConverterUnitTests {
 		return ctx;
 	}
 
+	static interface Wrapper {
+
+		void foo(@ModelAttribute User user);
+	}
+
 	private static class User {
 
 	}
+
+	private static class SubUser extends User {}
 
 	private static interface UserRepository extends CrudRepository<User, Long> {
 

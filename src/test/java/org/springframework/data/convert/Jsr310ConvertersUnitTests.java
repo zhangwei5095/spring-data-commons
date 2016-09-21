@@ -19,10 +19,15 @@ import static org.hamcrest.CoreMatchers.*;
 import static org.junit.Assert.*;
 
 import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
 
 import org.junit.Test;
 import org.springframework.core.convert.ConversionService;
@@ -103,6 +108,39 @@ public class Jsr310ConvertersUnitTests {
 
 		LocalTime now = LocalTime.now();
 		assertThat(format(CONVERSION_SERVICE.convert(now, Date.class), "HH:mm:ss.SSS"), is(now.toString()));
+	}
+
+	/**
+	 * @see DATACMNS-623
+	 */
+	@Test
+	public void convertsDateToInstant() {
+
+		Date now = new Date();
+		assertThat(CONVERSION_SERVICE.convert(now, Instant.class), is(now.toInstant()));
+	}
+
+	/**
+	 * @see DATACMNS-623
+	 */
+	@Test
+	public void convertsInstantToDate() {
+
+		Date now = new Date();
+		assertThat(CONVERSION_SERVICE.convert(now.toInstant(), Date.class), is(now));
+	}
+
+	@Test
+	public void convertsZoneIdToStringAndBack() {
+
+		Map<String, ZoneId> ids = new HashMap<String, ZoneId>();
+		ids.put("Europe/Berlin", ZoneId.of("Europe/Berlin"));
+		ids.put("+06:00", ZoneId.of("+06:00"));
+
+		for (Entry<String, ZoneId> entry : ids.entrySet()) {
+			assertThat(CONVERSION_SERVICE.convert(entry.getValue(), String.class), is(entry.getKey()));
+			assertThat(CONVERSION_SERVICE.convert(entry.getKey(), ZoneId.class), is(entry.getValue()));
+		}
 	}
 
 	private static String format(Date date, String format) {

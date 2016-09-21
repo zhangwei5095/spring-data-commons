@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 the original author or authors.
+ * Copyright 2014-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.springframework.data.repository.config;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,8 +30,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.EnvironmentCapable;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.ResourceLoader;
-import org.springframework.core.type.classreading.MetadataReader;
-import org.springframework.core.type.classreading.MetadataReaderFactory;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.data.repository.core.support.RepositoryFactorySupport;
 import org.springframework.util.Assert;
@@ -52,6 +49,8 @@ public class RepositoryConfigurationDelegate {
 	private static final String REPOSITORY_REGISTRATION = "Spring Data {} - Registering repository: {} - Interface: {} - Factory: {}";
 	private static final String MULTIPLE_MODULES = "Multiple Spring Data modules found, entering strict repository configuration mode!";
 	private static final String MODULE_DETECTION_PACKAGE = "org.springframework.data.**.repository.support";
+
+	static final String FACTORY_BEAN_OBJECT_TYPE = "factoryBeanObjectType";
 
 	private final RepositoryConfigurationSource configurationSource;
 	private final ResourceLoader resourceLoader;
@@ -143,6 +142,8 @@ public class RepositoryConfigurationDelegate {
 						configuration.getRepositoryInterface(), extension.getRepositoryFactoryClassName());
 			}
 
+			beanDefinition.setAttribute(FACTORY_BEAN_OBJECT_TYPE, configuration.getRepositoryInterface());
+
 			registry.registerBeanDefinition(beanName, beanDefinition);
 			definitions.add(new BeanComponentDefinition(beanDefinition, beanName));
 		}
@@ -162,47 +163,14 @@ public class RepositoryConfigurationDelegate {
 		ClassPathScanningCandidateComponentProvider scanner = new ClassPathScanningCandidateComponentProvider(false);
 		scanner.setEnvironment(environment);
 		scanner.setResourceLoader(resourceLoader);
-		scanner.addIncludeFilter(new LenientAssignableTypeFilter(RepositoryFactorySupport.class));
+		scanner.addIncludeFilter(new AssignableTypeFilter(RepositoryFactorySupport.class));
 
 		if (scanner.findCandidateComponents(MODULE_DETECTION_PACKAGE).size() > 1) {
 
-			LOGGER.debug(MULTIPLE_MODULES);
+			LOGGER.info(MULTIPLE_MODULES);
 			return true;
 		}
 
 		return false;
-	}
-
-	/**
-	 * Special {@link AssignableTypeFilter} that generally considers exceptions during type matching indicating a
-	 * non-match. TODO: Remove after upgrade to Spring 4.0.7.
-	 * 
-	 * @see https://jira.spring.io/browse/SPR-12042
-	 * @author Oliver Gierke
-	 */
-	private static class LenientAssignableTypeFilter extends AssignableTypeFilter {
-
-		/**
-		 * Creates a new {@link LenientAssignableTypeFilter} for the given target type.
-		 * 
-		 * @param targetType must not be {@literal null}.
-		 */
-		public LenientAssignableTypeFilter(Class<?> targetType) {
-			super(targetType);
-		}
-
-		/* 
-		 * (non-Javadoc)
-		 * @see org.springframework.core.type.filter.AbstractTypeHierarchyTraversingFilter#match(org.springframework.core.type.classreading.MetadataReader, org.springframework.core.type.classreading.MetadataReaderFactory)
-		 */
-		@Override
-		public boolean match(MetadataReader metadataReader, MetadataReaderFactory metadataReaderFactory) throws IOException {
-
-			try {
-				return super.match(metadataReader, metadataReaderFactory);
-			} catch (Exception o_O) {
-				return false;
-			}
-		}
 	}
 }

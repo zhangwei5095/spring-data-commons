@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ package org.springframework.data.repository.core.support;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Set;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.Repository;
@@ -24,6 +26,7 @@ import org.springframework.data.repository.core.CrudMethods;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.util.QueryExecutionConverters;
 import org.springframework.data.util.ClassTypeInformation;
+import org.springframework.data.util.ReflectionUtils;
 import org.springframework.data.util.TypeInformation;
 import org.springframework.util.Assert;
 
@@ -114,6 +117,15 @@ public abstract class AbstractRepositoryMetadata implements RepositoryMetadata {
 		return Arrays.asList(findAllMethod.getParameterTypes()).contains(Pageable.class);
 	}
 
+	/* 
+	 * (non-Javadoc)
+	 * @see org.springframework.data.repository.core.RepositoryMetadata#getAlternativeDomainTypes()
+	 */
+	@Override
+	public Set<Class<?>> getAlternativeDomainTypes() {
+		return Collections.emptySet();
+	}
+
 	/**
 	 * Recursively unwraps well known wrapper types from the given {@link TypeInformation}.
 	 * 
@@ -125,7 +137,7 @@ public abstract class AbstractRepositoryMetadata implements RepositoryMetadata {
 		Class<?> rawType = type.getType();
 
 		boolean needToUnwrap = Iterable.class.isAssignableFrom(rawType) || rawType.isArray()
-				|| QueryExecutionConverters.supports(rawType);
+				|| QueryExecutionConverters.supports(rawType) || ReflectionUtils.isJava8StreamType(rawType);
 
 		return needToUnwrap ? unwrapWrapperTypes(type.getComponentType()) : rawType;
 	}

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,14 +23,15 @@ import java.util.List;
 import org.springframework.data.domain.Sort;
 import org.springframework.util.Assert;
 
-import com.mysema.query.types.Expression;
-import com.mysema.query.types.OrderSpecifier;
-import com.mysema.query.types.Path;
+import com.querydsl.core.types.Expression;
+import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.Path;
 
 /**
- * Sort option for queries that wraps a querydsl {@link OrderSpecifier}.
+ * Sort option for queries that wraps a Querydsl {@link OrderSpecifier}.
  * 
  * @author Thomas Darimont
+ * @author Christoph Strobl
  */
 public class QSort extends Sort implements Serializable {
 
@@ -41,7 +42,7 @@ public class QSort extends Sort implements Serializable {
 	/**
 	 * Creates a new {@link QSort} instance with the given {@link OrderSpecifier}s.
 	 * 
-	 * @param orderSpecifiers must not be {@literal null} or empty;
+	 * @param orderSpecifiers must not be {@literal null} or empty.
 	 */
 	public QSort(OrderSpecifier<?>... orderSpecifiers) {
 		this(Arrays.asList(orderSpecifiers));
@@ -50,10 +51,12 @@ public class QSort extends Sort implements Serializable {
 	/**
 	 * Creates a new {@link QSort} instance with the given {@link OrderSpecifier}s.
 	 * 
-	 * @param orderSpecifiers must not be {@literal null} or empty;
+	 * @param orderSpecifiers must not be {@literal null} or empty.
 	 */
 	public QSort(List<OrderSpecifier<?>> orderSpecifiers) {
+
 		super(toOrders(orderSpecifiers));
+
 		Assert.notEmpty(orderSpecifiers, "Order specifiers must not be null or empty!");
 		this.orderSpecifiers = orderSpecifiers;
 	}
@@ -87,8 +90,8 @@ public class QSort extends Sort implements Serializable {
 		Assert.notNull(orderSpecifier, "Order specifier must not be null!");
 
 		Expression<?> target = orderSpecifier.getTarget();
-		Object targetElement = target instanceof Path ? ((com.mysema.query.types.Path<?>) target).getMetadata()
-				.getElement() : target;
+
+		Object targetElement = target instanceof Path ? preparePropertyPath((Path<?>) target) : target;
 
 		Assert.notNull(targetElement, "Target element must not be null!");
 
@@ -141,5 +144,19 @@ public class QSort extends Sort implements Serializable {
 
 		Assert.notEmpty(orderSpecifiers, "OrderSpecifiers must not be null or empty!");
 		return and(Arrays.asList(orderSpecifiers));
+	}
+
+	/**
+	 * Recursively creates a dot-separated path for the property path.
+	 * 
+	 * @param path must not be {@literal null}.
+	 * @return
+	 */
+	private static String preparePropertyPath(Path<?> path) {
+
+		Path<?> root = path.getRoot();
+
+		return root == null || path.equals(root) ? path.toString()
+				: path.toString().substring(root.toString().length() + 1);
 	}
 }

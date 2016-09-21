@@ -18,6 +18,7 @@ package org.springframework.data.mapping.context;
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
+
 import groovy.lang.MetaClass;
 
 import java.util.Collections;
@@ -25,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.TreeMap;
 
+import org.hamcrest.Matchers;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -58,8 +60,8 @@ public class AbstractMappingContextUnitTests {
 
 	@Test
 	public void doesNotTryToLookupPersistentEntityForLeafProperty() {
-		PersistentPropertyPath<SamplePersistentProperty> path = context.getPersistentPropertyPath(PropertyPath.from("name",
-				Person.class));
+		PersistentPropertyPath<SamplePersistentProperty> path = context
+				.getPersistentPropertyPath(PropertyPath.from("name", Person.class));
 		assertThat(path, is(notNullValue()));
 	}
 
@@ -245,6 +247,37 @@ public class AbstractMappingContextUnitTests {
 		assertHasEntityFor(TreeMap.class, context, false);
 	}
 
+	/**
+	 * @see DATACMNS-695
+	 */
+	@Test
+	public void persistentPropertyPathTraversesGenericTypesCorrectly() {
+		assertThat(context.getPersistentPropertyPath("field.wrapped.field", Outer.class),
+				is(Matchers.<SamplePersistentProperty> iterableWithSize(3)));
+	}
+
+	/**
+	 * @see DATACMNS-727
+	 */
+	@Test
+	public void exposesContextForFailingPropertyPathLookup() {
+
+		try {
+
+			context.getPersistentPropertyPath("persons.firstname", Sample.class);
+			fail("Expected InvalidPersistentPropertyPath!");
+
+		} catch (InvalidPersistentPropertyPath o_O) {
+
+			assertThat(o_O.getMessage(), not(isEmptyOrNullString()));
+			assertThat(o_O.getResolvedPath(), is("persons"));
+			assertThat(o_O.getUnresolvableSegment(), is("firstname"));
+
+			// Make sure, the resolvable part can be obtained
+			assertThat(context.getPersistentPropertyPath(o_O), is(notNullValue()));
+		}
+	}
+
 	private static void assertHasEntityFor(Class<?> type, SampleMappingContext context, boolean expected) {
 
 		boolean found = false;
@@ -282,5 +315,18 @@ public class AbstractMappingContextUnitTests {
 
 	static class Extension extends Base {
 		@Id String foo;
+	}
+
+	static class Outer {
+
+		Wrapper<Inner> field;
+	}
+
+	static class Wrapper<T> {
+		T wrapped;
+	}
+
+	static class Inner {
+		String field;
 	}
 }

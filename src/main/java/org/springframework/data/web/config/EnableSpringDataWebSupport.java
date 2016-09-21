@@ -23,9 +23,17 @@ import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.context.EnvironmentAware;
+import org.springframework.context.ResourceLoaderAware;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.ImportSelector;
+import org.springframework.core.env.Environment;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.core.type.AnnotationMetadata;
+import org.springframework.core.type.filter.AnnotationTypeFilter;
+import org.springframework.data.querydsl.QueryDslUtils;
 import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.util.ClassUtils;
 
@@ -63,7 +71,8 @@ import org.springframework.util.ClassUtils;
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ ElementType.TYPE, ElementType.ANNOTATION_TYPE })
 @Inherited
-@Import(EnableSpringDataWebSupport.SpringDataWebConfigurationImportSelector.class)
+@Import({ EnableSpringDataWebSupport.SpringDataWebConfigurationImportSelector.class,
+		EnableSpringDataWebSupport.QuerydslActivator.class })
 public @interface EnableSpringDataWebSupport {
 
 	/**
@@ -74,11 +83,33 @@ public @interface EnableSpringDataWebSupport {
 	 * 
 	 * @author Oliver Gierke
 	 */
-	class SpringDataWebConfigurationImportSelector implements ImportSelector {
+	static class SpringDataWebConfigurationImportSelector
+			implements ImportSelector, EnvironmentAware, ResourceLoaderAware {
 
 		// Don't make final to allow test cases faking this to false
 		private static boolean HATEOAS_PRESENT = ClassUtils.isPresent("org.springframework.hateoas.Link", null);
 		private static boolean JACKSON_PRESENT = ClassUtils.isPresent("com.fasterxml.jackson.databind.ObjectMapper", null);
+
+		private Environment environment;
+		private ResourceLoader resourceLoader;
+
+		/* 
+		 * (non-Javadoc)
+		 * @see org.springframework.context.EnvironmentAware#setEnvironment(org.springframework.core.env.Environment)
+		 */
+		@Override
+		public void setEnvironment(Environment environment) {
+			this.environment = environment;
+		}
+
+		/* 
+		 * (non-Javadoc)
+		 * @see org.springframework.context.ResourceLoaderAware#setResourceLoader(org.springframework.core.io.ResourceLoader)
+		 */
+		@Override
+		public void setResourceLoader(ResourceLoader resourceLoader) {
+			this.resourceLoader = resourceLoader;
+		}
 
 		/* 
 		 * (non-Javadoc)
@@ -93,10 +124,39 @@ public @interface EnableSpringDataWebSupport {
 					: SpringDataWebConfiguration.class.getName());
 
 			if (JACKSON_PRESENT) {
-				imports.add(SpringDataJacksonConfiguration.class.getName());
+
+				ClassPathScanningCandidateComponentProvider provider = new ClassPathScanningCandidateComponentProvider(false);
+				provider.setEnvironment(environment);
+				provider.setResourceLoader(resourceLoader);
+				provider.addIncludeFilter(new AnnotationTypeFilter(SpringDataWebConfigurationMixin.class));
+
+				for (BeanDefinition definition : provider.findCandidateComponents("org.springframework.data")) {
+					imports.add(definition.getBeanClassName());
+				}
 			}
 
 			return imports.toArray(new String[imports.size()]);
+		}
+	}
+
+	/**
+	 * Import selector to register {@link QuerydslWebConfiguration} as configuration class if Querydsl is on the
+	 * classpath.
+	 *
+	 * @author Oliver Gierke
+	 * @soundtrack Anika Nilles - Chary Life
+	 * @since 1.11
+	 */
+	static class QuerydslActivator implements ImportSelector {
+
+		/* 
+		 * (non-Javadoc)
+		 * @see org.springframework.context.annotation.ImportSelector#selectImports(org.springframework.core.type.AnnotationMetadata)
+		 */
+		@Override
+		public String[] selectImports(AnnotationMetadata importingClassMetadata) {
+			return QueryDslUtils.QUERY_DSL_PRESENT ? new String[] { QuerydslWebConfiguration.class.getName() }
+					: new String[0];
 		}
 	}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,12 @@ package org.springframework.data.web;
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -28,11 +31,14 @@ import org.springframework.data.domain.AbstractPageRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.hateoas.Link;
 import org.springframework.hateoas.PagedResources;
+import org.springframework.hateoas.PagedResources.PageMetadata;
 import org.springframework.hateoas.Resource;
 import org.springframework.hateoas.ResourceAssembler;
 import org.springframework.hateoas.ResourceSupport;
+import org.springframework.hateoas.core.EmbeddedWrapper;
 import org.springframework.web.util.UriComponents;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -44,7 +50,11 @@ import org.springframework.web.util.UriComponentsBuilder;
  */
 public class PagedResourcesAssemblerUnitTests {
 
+	static final Pageable PAGEABLE = new PageRequest(0, 20);
+	static final Page<Person> EMPTY_PAGE = new PageImpl<Person>(Collections.<Person> emptyList(), PAGEABLE, 0);
+
 	HateoasPageableHandlerMethodArgumentResolver resolver = new HateoasPageableHandlerMethodArgumentResolver();
+	PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 
 	@Before
 	public void setUp() {
@@ -54,7 +64,6 @@ public class PagedResourcesAssemblerUnitTests {
 	@Test
 	public void addsNextLinkForFirstPage() {
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(0));
 
 		assertThat(resources.getLink(Link.REL_PREVIOUS), is(nullValue()));
@@ -65,7 +74,6 @@ public class PagedResourcesAssemblerUnitTests {
 	@Test
 	public void addsPreviousAndNextLinksForMiddlePage() {
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(1));
 
 		assertThat(resources.getLink(Link.REL_PREVIOUS), is(notNullValue()));
@@ -76,7 +84,6 @@ public class PagedResourcesAssemblerUnitTests {
 	@Test
 	public void addsPreviousLinkForLastPage() {
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(2));
 
 		assertThat(resources.getLink(Link.REL_PREVIOUS), is(notNullValue()));
@@ -102,7 +109,6 @@ public class PagedResourcesAssemblerUnitTests {
 
 		Link link = new Link("http://foo:9090", "rel");
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(1), link);
 
 		assertThat(resources.getLink(Link.REL_PREVIOUS).getHref(), startsWith(link.getHref()));
@@ -117,7 +123,6 @@ public class PagedResourcesAssemblerUnitTests {
 	public void createsPagedResourcesForOneIndexedArgumentResolver() {
 
 		resolver.setOneIndexedParameters(true);
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 
 		AbstractPageRequest request = new PageRequest(0, 1);
 		Page<Person> page = new PageImpl<Person>(Collections.<Person> emptyList(), request, 0);
@@ -127,15 +132,15 @@ public class PagedResourcesAssemblerUnitTests {
 
 	/**
 	 * @see DATACMNS-418
+	 * @see DATACMNS-515
 	 */
 	@Test
-	public void addsSelfLinkWithPaginationTemplateVariables() {
+	public void createsACanonicalLinkWithoutTemplateParameters() {
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(1));
 
 		Link selfLink = resources.getLink(Link.REL_SELF);
-		assertThat(selfLink.getHref(), endsWith("{?page,size,sort}"));
+		assertThat(selfLink.getHref(), endsWith("localhost"));
 	}
 
 	/**
@@ -144,7 +149,6 @@ public class PagedResourcesAssemblerUnitTests {
 	@Test
 	public void invokesCustomElementResourceAssembler() {
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
 		PersonResourceAssembler personAssembler = new PersonResourceAssembler();
 
 		PagedResources<PersonResource> resources = assembler.toResource(createPage(0), personAssembler);
@@ -157,30 +161,130 @@ public class PagedResourcesAssemblerUnitTests {
 	}
 
 	/**
-	 * @see DATACMNS-418
+	 * @see DATAMCNS-563
 	 */
 	@Test
-	public void appendsMissingTemplateParametersToLink() {
+	public void createsPaginationLinksForOneIndexedArgumentResolverCorrectly() {
 
-		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
+		HateoasPageableHandlerMethodArgumentResolver argumentResolver = new HateoasPageableHandlerMethodArgumentResolver();
+		argumentResolver.setOneIndexedParameters(true);
 
-		Link link = new Link("/foo?page=0");
-		assertThat(assembler.appendPaginationParameterTemplates(link), is(new Link("/foo?page=0{&size,sort}")));
+		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(argumentResolver, null);
+		PagedResources<Resource<Person>> resource = assembler.toResource(createPage(1));
+
+		assertThat(resource.hasLink("prev"), is(true));
+		assertThat(resource.hasLink("next"), is(true));
+
+		assertThat(getQueryParameters(resource.getLink("prev")), hasEntry("page", "1"));
+		assertThat(getQueryParameters(resource.getLink("next")), hasEntry("page", "3"));
 	}
 
 	/**
-	 * @see DATACMNS-519
+	 * @see DATACMNS-515
 	 */
 	@Test
-	public void keepsExistingTemplateVariablesFromBaseLink() {
+	public void generatedLinksShouldNotBeTemplated() {
+
+		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(1));
+
+		assertThat(resources.getLink(Link.REL_SELF).getHref(), endsWith("localhost"));
+		assertThat(resources.getLink(Link.REL_NEXT).getHref(), endsWith("?page=2&size=1"));
+		assertThat(resources.getLink(Link.REL_PREVIOUS).getHref(), endsWith("?page=0&size=1"));
+	}
+
+	/**
+	 * @see DATACMNS-699
+	 */
+	@Test
+	public void generatesEmptyPagedResourceWithEmbeddedWrapper() {
+
+		PagedResources<?> result = assembler.toEmptyResource(EMPTY_PAGE, Person.class, null);
+
+		Collection<?> content = result.getContent();
+		assertThat(content, hasSize(1));
+
+		Object element = content.iterator().next();
+		assertThat(element, is(instanceOf(EmbeddedWrapper.class)));
+		assertThat(((EmbeddedWrapper) element).getRelTargetType(), is(typeCompatibleWith(Person.class)));
+	}
+
+	/**
+	 * @see DATACMNS-699
+	 */
+	@Test(expected = IllegalArgumentException.class)
+	public void emptyPageCreatorRejectsPageWithContent() {
+		assembler.toEmptyResource(createPage(1), Person.class, null);
+	}
+
+	/**
+	 * @see DATACMNS-699
+	 */
+	@Test(expected = IllegalArgumentException.class)
+	public void emptyPageCreatorRejectsNullType() {
+		assembler.toEmptyResource(EMPTY_PAGE, null, null);
+	}
+
+	/**
+	 * @see DATACMNS-701
+	 */
+	@Test
+	public void addsFirstAndLastLinksForMultiplePages() {
+
+		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(1));
+
+		assertThat(resources.getLink(Link.REL_FIRST).getHref(), endsWith("?page=0&size=1"));
+		assertThat(resources.getLink(Link.REL_LAST).getHref(), endsWith("?page=2&size=1"));
+	}
+
+	/**
+	 * @see DATACMNS-701
+	 */
+	@Test
+	public void addsFirstAndLastLinksForFirstPage() {
+
+		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(0));
+
+		assertThat(resources.getLink(Link.REL_FIRST).getHref(), endsWith("?page=0&size=1"));
+		assertThat(resources.getLink(Link.REL_LAST).getHref(), endsWith("?page=2&size=1"));
+	}
+
+	/**
+	 * @see DATACMNS-701
+	 */
+	@Test
+	public void addsFirstAndLastLinksForLastPage() {
+
+		PagedResources<Resource<Person>> resources = assembler.toResource(createPage(2));
+
+		assertThat(resources.getLink(Link.REL_FIRST).getHref(), endsWith("?page=0&size=1"));
+		assertThat(resources.getLink(Link.REL_LAST).getHref(), endsWith("?page=2&size=1"));
+	}
+
+	/**
+	 * @see DATACMNS-701
+	 */
+	@Test
+	public void alwaysAddsFirstAndLastLinkIfConfiguredTo() {
 
 		PagedResourcesAssembler<Person> assembler = new PagedResourcesAssembler<Person>(resolver, null);
+		assembler.setForceFirstAndLastRels(true);
 
-		Link link = new Link("/foo?page=0{&projection}");
-		Link result = assembler.appendPaginationParameterTemplates(link);
+		PagedResources<Resource<Person>> resources = assembler.toResource(EMPTY_PAGE);
 
-		assertThat(result.getVariableNames(), hasSize(3));
-		assertThat(result.getVariableNames(), hasItems("projection", "size", "sort"));
+		assertThat(resources.getLink(Link.REL_FIRST).getHref(), endsWith("?page=0&size=20"));
+		assertThat(resources.getLink(Link.REL_LAST).getHref(), endsWith("?page=0&size=20"));
+	}
+
+	/**
+	 * @see DATACMNS-802
+	 */
+	@Test
+	public void usesCustomPagedResources() {
+
+		ResourceAssembler<Page<Person>, PagedResources<Resource<Person>>> assembler = new CustomPagedResourcesAssembler<Person>(
+				resolver, null);
+
+		assertThat(assembler.toResource(EMPTY_PAGE), is(instanceOf(CustomPagedResources.class)));
 	}
 
 	private static Page<Person> createPage(int index) {
@@ -191,6 +295,12 @@ public class PagedResourcesAssemblerUnitTests {
 		person.name = "Dave";
 
 		return new PageImpl<Person>(Arrays.asList(person), request, 3);
+	}
+
+	private static Map<String, String> getQueryParameters(Link link) {
+
+		UriComponents uriComponents = UriComponentsBuilder.fromUri(URI.create(link.expand().getHref())).build();
+		return uriComponents.getQueryParams().toSingleValueMap();
 	}
 
 	static class Person {
@@ -212,6 +322,26 @@ public class PagedResourcesAssemblerUnitTests {
 			PersonResource resource = new PersonResource();
 			resource.name = entity.name;
 			return resource;
+		}
+	}
+
+	static class CustomPagedResourcesAssembler<T> extends PagedResourcesAssembler<T> {
+
+		public CustomPagedResourcesAssembler(HateoasPageableHandlerMethodArgumentResolver resolver, UriComponents baseUri) {
+			super(resolver, baseUri);
+		}
+
+		@Override
+		protected <R extends ResourceSupport, S> PagedResources<R> createPagedResource(List<R> resources,
+				PageMetadata metadata, Page<S> page) {
+			return new CustomPagedResources<R>(resources, metadata);
+		}
+	}
+
+	static class CustomPagedResources<R extends ResourceSupport> extends PagedResources<R> {
+
+		public CustomPagedResources(Collection<R> content, PageMetadata metadata) {
+			super(content, metadata);
 		}
 	}
 }

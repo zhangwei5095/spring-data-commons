@@ -1,5 +1,5 @@
 /*
- * Copyright 2008-2014 the original author or authors.
+ * Copyright 2008-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not
  * use this file except in compliance with the License. You may obtain a copy of
@@ -27,6 +27,7 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 
+import org.hamcrest.Matchers;
 import org.junit.Test;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Sort.Direction;
@@ -43,10 +44,11 @@ import org.springframework.data.repository.query.parser.PartTree.OrPart;
  * @author Thomas Darimont
  * @author Martin Baumgartner
  * @author Christoph Strobl
+ * @author Mark Paluch
  */
 public class PartTreeUnitTests {
 
-	private String[] PREFIXES = { "find", "read", "get", "query", "count", "delete", "remove" };
+	private String[] PREFIXES = { "find", "read", "get", "query", "stream", "count", "delete", "remove", "exists" };
 
 	@Test(expected = IllegalArgumentException.class)
 	public void rejectsNullSource() throws Exception {
@@ -436,6 +438,16 @@ public class PartTreeUnitTests {
 	}
 
 	/**
+	 * @see DATACMNS-875
+	 */
+	@Test
+	public void identifiesSimpleExistsByCorrectly() {
+
+		PartTree tree = new PartTree("existsByLastname", User.class);
+		assertThat(tree.isExistsProjection(), is(true));
+	}
+
+	/**
 	 * @see DATACMNS-399
 	 */
 	@Test
@@ -650,25 +662,54 @@ public class PartTreeUnitTests {
 		assertLimiting("countFirst10DistinctUsersByLastname", User.class, false, null, true);
 		assertLimiting("countTop10DistinctUsersByLastname", User.class, false, null, true);
 	}
-	
+
+	/**
+	 * @see DATACMNS-875
+	 */
+	@Test
+	public void shouldNotSupportLimitingExistQueries() {
+
+		assertLimiting("existsFirst10DistinctUsersByLastname", User.class, false, null, true);
+		assertLimiting("existsTop10DistinctUsersByLastname", User.class, false, null, true);
+	}
+
 	/**
 	 * @see DATACMNS-581
 	 */
 	@Test
 	public void parsesIsNotContainingCorrectly() throws Exception {
-		assertType(asList("firstnameIsNotContaining", "firstnameNotContaining", "firstnameNotContains"), NOT_CONTAINING, "firstname");
+		assertType(asList("firstnameIsNotContaining", "firstnameNotContaining", "firstnameNotContains"), NOT_CONTAINING,
+				"firstname");
 	}
-	
+
 	/**
 	 * @see DATACMNS-581
 	 */
 	@Test
 	public void buildsPartTreeForNotContainingCorrectly() throws Exception {
-		
+
 		PartTree tree = new PartTree("findAllByLegalNameNotContaining", Organization.class);
 		assertPart(tree, new Part[] { new Part("legalNameNotContaining", Organization.class) });
 	}
-	
+
+	/**
+	 * @see DATACMNS-750
+	 */
+	@Test
+	public void doesNotFailOnPropertiesContainingAKeyword() {
+
+		PartTree partTree = new PartTree("findBySomeInfoIn", Category.class);
+
+		Iterable<Part> parts = partTree.getParts();
+
+		assertThat(parts, is(Matchers.<Part> iterableWithSize(1)));
+
+		Part part = parts.iterator().next();
+
+		assertThat(part.getType(), is(Type.IN));
+		assertThat(part.getProperty(), is(PropertyPath.from("someInfo", Category.class)));
+	}
+
 	private static void assertLimiting(String methodName, Class<?> entityType, boolean limiting, Integer maxResults) {
 		assertLimiting(methodName, entityType, limiting, maxResults, false);
 	}
@@ -790,6 +831,8 @@ public class PartTreeUnitTests {
 	interface Category {
 
 		Long getId();
+
+		String getSomeInfo();
 	}
 
 	interface Order {

@@ -21,8 +21,10 @@ import java.io.Serializable;
 import java.lang.reflect.Method;
 
 import org.mockito.Mockito;
+import org.springframework.data.projection.ProjectionFactory;
 import org.springframework.data.repository.core.EntityInformation;
 import org.springframework.data.repository.core.NamedQueries;
+import org.springframework.data.repository.core.RepositoryInformation;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.RepositoryFactorySupportUnitTests.MyRepositoryQuery;
 import org.springframework.data.repository.query.QueryLookupStrategy;
@@ -47,9 +49,8 @@ public class DummyRepositoryFactory extends RepositoryFactorySupport {
 
 		this.repository = repository;
 
-		when(
-				strategy.resolveQuery(Mockito.any(Method.class), Mockito.any(RepositoryMetadata.class),
-						Mockito.any(NamedQueries.class))).thenReturn(queryOne);
+		when(strategy.resolveQuery(Mockito.any(Method.class), Mockito.any(RepositoryMetadata.class),
+				Mockito.any(ProjectionFactory.class), Mockito.any(NamedQueries.class))).thenReturn(queryOne);
 	}
 
 	/*
@@ -67,7 +68,7 @@ public class DummyRepositoryFactory extends RepositoryFactorySupport {
 	 * @see org.springframework.data.repository.core.support.RepositoryFactorySupport#getTargetRepository(org.springframework.data.repository.core.RepositoryMetadata)
 	 */
 	@Override
-	protected Object getTargetRepository(RepositoryMetadata metadata) {
+	protected Object getTargetRepository(RepositoryInformation information) {
 		return repository;
 	}
 

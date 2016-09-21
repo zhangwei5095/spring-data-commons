@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -223,12 +223,45 @@ public class DefaultRepositoryInformationUnitTests {
 		}
 	}
 
-	private Method getMethodFrom(Class<?> type, String name) {
+	/**
+	 * @see DATACMNS-854
+	 */
+	@Test
+	public void discoversCustomlyImplementedCrudMethodWithGenerics() throws SecurityException, NoSuchMethodException {
+
+		RepositoryMetadata metadata = new DefaultRepositoryMetadata(FooRepository.class);
+		RepositoryInformation information = new DefaultRepositoryInformation(metadata, CrudRepository.class,
+				customImplementation.getClass());
+
+		Method source = FooRepositoryCustom.class.getMethod("exists", Object.class);
+		Method expected = customImplementation.getClass().getMethod("exists", Object.class);
+
+		assertThat(information.getTargetClassMethod(source), is(expected));
+	}
+
+	/**
+	 * @see DATACMNS-912
+	 */
+	@Test
+	public void discoversCustomlyImplementedCrudMethodWithGenericParameters() throws Exception {
+
+		SampleRepositoryImpl customImplementation = new SampleRepositoryImpl();
+		RepositoryMetadata metadata = new DefaultRepositoryMetadata(SampleRepository.class);
+		RepositoryInformation information = new DefaultRepositoryInformation(metadata, RepositoryFactorySupport.class,
+				customImplementation.getClass());
+
+		Method customBaseRepositoryMethod = SampleRepository.class.getMethod("save", Object.class);
+		assertThat(information.isCustomMethod(customBaseRepositoryMethod), is(true));
+	}
+
+	private static Method getMethodFrom(Class<?> type, String name) {
+
 		for (Method method : type.getMethods()) {
 			if (method.getName().equals(name)) {
 				return method;
 			}
 		}
+
 		return null;
 	}
 
@@ -236,7 +269,6 @@ public class DefaultRepositoryInformationUnitTests {
 	@Retention(RetentionPolicy.RUNTIME)
 	@QueryAnnotation
 	@interface MyQuery {
-
 	}
 
 	interface FooRepository extends CrudRepository<User, Integer>, FooRepositoryCustom {
@@ -248,8 +280,11 @@ public class DefaultRepositoryInformationUnitTests {
 		User findOne(Long primaryKey);
 	}
 
-	interface FooRepositoryCustom {
+	interface FooSuperInterfaceWithGenerics<T> {
+		boolean exists(T id);
+	}
 
+	interface FooRepositoryCustom extends FooSuperInterfaceWithGenerics<User> {
 		User save(User user);
 	}
 
@@ -268,7 +303,7 @@ public class DefaultRepositoryInformationUnitTests {
 
 		@Override
 		public Iterator<User> iterator() {
-			return Collections.<User> emptySet().iterator();
+			return Collections.<User>emptySet().iterator();
 		}
 	}
 
@@ -320,4 +355,15 @@ public class DefaultRepositoryInformationUnitTests {
 		@MyQuery
 		List<User> findAll();
 	}
+
+	interface SampleRepository extends CrudRepository<Sample, Long> {}
+
+	static class SampleRepositoryImpl {
+
+		public <S extends Sample> S save(S entity) {
+			return entity;
+		}
+	}
+
+	static class Sample {}
 }

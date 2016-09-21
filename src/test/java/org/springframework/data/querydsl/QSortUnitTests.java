@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 the original author or authors.
+ * Copyright 2013-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,11 @@
  */
 package org.springframework.data.querydsl;
 
-import static org.hamcrest.Matchers.hasItems;
-import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.Matchers.*;
+import static org.junit.Assert.*;
+import static org.springframework.data.querydsl.QQSortUnitTests_WrapperToWrapWrapperForUserWrapper.*;
+import static org.springframework.data.querydsl.QQSortUnitTests_WrapperToWrapWrapperForUserWrapper_WrapperForUserWrapper.*;
+import static org.springframework.data.querydsl.QQSortUnitTests_WrapperToWrapWrapperForUserWrapper_WrapperForUserWrapper_UserWrapper.*;
 
 import java.util.List;
 
@@ -27,13 +29,17 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Sort.Direction;
 import org.springframework.data.domain.Sort.Order;
 
-import com.mysema.query.types.OrderSpecifier;
+import com.querydsl.core.annotations.QueryInit;
+import com.querydsl.core.types.OrderSpecifier;
+import com.querydsl.core.types.dsl.PathBuilderFactory;
+import com.querydsl.core.types.dsl.StringPath;
 
 /**
  * Unit tests for {@link QSort}.
  * 
  * @author Thomas Darimont
  * @author Oliver Gierke
+ * @author Christoph Strobl
  */
 public class QSortUnitTests {
 
@@ -147,7 +153,7 @@ public class QSortUnitTests {
 		assertThat(result, is(Matchers.<Order> iterableWithSize(2)));
 		assertThat(result, hasItems(new Order(Direction.ASC, "lastname"), new Order(Direction.ASC, "firstname")));
 	}
-	
+
 	/**
 	 * @see DATACMNS-566
 	 */
@@ -159,6 +165,72 @@ public class QSortUnitTests {
 
 		Sort result = sort.and(new Sort(Direction.ASC, "lastname"));
 		assertThat(result, is(Matchers.<Order> iterableWithSize(2)));
-		assertThat(result, hasItems(new Order(Direction.ASC, "lastname"), new Order(Direction.ASC, user.dateOfBirth.yearMonth().toString())));
+		assertThat(result, hasItems(new Order(Direction.ASC, "lastname"),
+				new Order(Direction.ASC, user.dateOfBirth.yearMonth().toString())));
+	}
+
+	/**
+	 * @see DATACMNS-621
+	 */
+	@Test
+	public void shouldCreateSortForNestedPathCorrectly() {
+
+		QSort sort = new QSort(userWrapper.user.firstname.asc());
+
+		assertThat(sort, hasItems(new Order(Direction.ASC, "user.firstname")));
+	}
+
+	/**
+	 * @see DATACMNS-621
+	 */
+	@Test
+	public void shouldCreateSortForDeepNestedPathCorrectly() {
+
+		QSort sort = new QSort(wrapperForUserWrapper.wrapper.user.firstname.asc());
+
+		assertThat(sort, hasItems(new Order(Direction.ASC, "wrapper.user.firstname")));
+	}
+
+	/**
+	 * @see DATACMNS-621
+	 */
+	@Test
+	public void shouldCreateSortForReallyDeepNestedPathCorrectly() {
+
+		QSort sort = new QSort(wrapperToWrapWrapperForUserWrapper.wrapperForUserWrapper.wrapper.user.firstname.asc());
+
+		assertThat(sort, hasItems(new Order(Direction.ASC, "wrapperForUserWrapper.wrapper.user.firstname")));
+	}
+
+	/**
+	 * @see DATACMNS-755
+	 */
+	@Test
+	public void handlesPlainStringPathsCorrectly() {
+
+		StringPath path = new PathBuilderFactory().create(User.class).getString("firstname");
+
+		QSort sort = new QSort(new OrderSpecifier<String>(com.querydsl.core.types.Order.ASC, path));
+
+		assertThat(sort, hasItems(new Order(Direction.ASC, "firstname")));
+	}
+
+	@com.querydsl.core.annotations.QueryEntity
+	static class WrapperToWrapWrapperForUserWrapper {
+
+		@QueryInit("wrapper.user") //
+		WrapperForUserWrapper wrapperForUserWrapper;
+
+		@com.querydsl.core.annotations.QueryEntity
+		static class WrapperForUserWrapper {
+
+			UserWrapper wrapper;
+
+			@com.querydsl.core.annotations.QueryEntity
+			static class UserWrapper {
+
+				User user;
+			}
+		}
 	}
 }

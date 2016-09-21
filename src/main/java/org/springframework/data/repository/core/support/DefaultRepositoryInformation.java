@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2016 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ package org.springframework.data.repository.core.support;
 
 import static org.springframework.core.GenericTypeResolver.*;
 import static org.springframework.data.repository.util.ClassUtils.*;
+import static org.springframework.util.ReflectionUtils.*;
 
 import java.io.Serializable;
+import java.lang.reflect.GenericDeclaration;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.lang.reflect.TypeVariable;
@@ -29,6 +31,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.core.MethodParameter;
+import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.data.annotation.QueryAnnotation;
 import org.springframework.data.repository.Repository;
@@ -117,13 +120,20 @@ class DefaultRepositoryInformation implements RepositoryInformation {
 		Method result = getTargetClassMethod(method, customImplementationClass);
 
 		if (!result.equals(method)) {
-			methodCache.put(method, result);
-			return result;
+			return cacheAndReturn(method, result);
 		}
 
-		result = getTargetClassMethod(method, repositoryBaseClass);
-		methodCache.put(method, result);
-		return result;
+		return cacheAndReturn(method, getTargetClassMethod(method, repositoryBaseClass));
+	}
+
+	private Method cacheAndReturn(Method key, Method value) {
+
+		if (value != null) {
+			makeAccessible(value);
+		}
+
+		methodCache.put(key, value);
+		return value;
 	}
 
 	/**
@@ -315,6 +325,15 @@ class DefaultRepositoryInformation implements RepositoryInformation {
 		return metadata.isPagingRepository();
 	}
 
+	/* 
+	 * (non-Javadoc)
+	 * @see org.springframework.data.repository.core.RepositoryMetadata#getAlternativeDomainTypes()
+	 */
+	@Override
+	public Set<Class<?>> getAlternativeDomainTypes() {
+		return metadata.getAlternativeDomainTypes();
+	}
+
 	/**
 	 * Checks the given method's parameters to match the ones of the given base class method. Matches generic arguments
 	 * agains the ones bound in the given repository interface.
@@ -325,23 +344,28 @@ class DefaultRepositoryInformation implements RepositoryInformation {
 	 */
 	private boolean parametersMatch(Method method, Method baseClassMethod) {
 
+		Class<?>[] methodParameterTypes = method.getParameterTypes();
 		Type[] genericTypes = baseClassMethod.getGenericParameterTypes();
 		Class<?>[] types = baseClassMethod.getParameterTypes();
 
 		for (int i = 0; i < genericTypes.length; i++) {
 
-			Type type = genericTypes[i];
+			Type genericType = genericTypes[i];
+			Class<?> type = types[i];
 			MethodParameter parameter = new MethodParameter(method, i);
 			Class<?> parameterType = resolveParameterType(parameter, metadata.getRepositoryInterface());
 
-			if (type instanceof TypeVariable<?>) {
-				if (!matchesGenericType((TypeVariable<?>) type, parameterType)) {
+			if (genericType instanceof TypeVariable<?>) {
+
+				if (!matchesGenericType((TypeVariable<?>) genericType, ResolvableType.forMethodParameter(parameter))) {
 					return false;
 				}
-			} else {
-				if (!types[i].equals(parameterType)) {
-					return false;
-				}
+
+				continue;
+			}
+
+			if (!type.isAssignableFrom(parameterType) || !type.equals(methodParameterTypes[i])) {
+				return false;
 			}
 		}
 
@@ -353,30 +377,43 @@ class DefaultRepositoryInformation implements RepositoryInformation {
 	 * declared, the method ensures that given method parameter is the primary key type declared in the given repository
 	 * interface e.g.
 	 * 
-	 * @param name
-	 * @param parameterType
+	 * @param variable must not be {@literal null}.
+	 * @param parameterType must not be {@literal null}.
 	 * @return
 	 */
-	private boolean matchesGenericType(TypeVariable<?> variable, Class<?> parameterType) {
+	private boolean matchesGenericType(TypeVariable<?> variable, ResolvableType parameterType) {
 
-		Class<?> entityType = getDomainType();
-		Class<?> idClass = getIdType();
+		GenericDeclaration declaration = variable.getGenericDeclaration();
 
-		if (ID_TYPE_NAME.equals(variable.getName()) && parameterType.isAssignableFrom(idClass)) {
-			return true;
+		if (declaration instanceof Class) {
+
+			ResolvableType entityType = ResolvableType.forClass(getDomainType());
+			ResolvableType idClass = ResolvableType.forClass(getIdType());
+
+			if (ID_TYPE_NAME.equals(variable.getName()) && parameterType.isAssignableFrom(idClass)) {
+				return true;
+			}
+
+			Type boundType = variable.getBounds()[0];
+			String referenceName = boundType instanceof TypeVariable ? boundType.toString() : variable.toString();
+
+			boolean isDomainTypeVariableReference = DOMAIN_TYPE_NAME.equals(referenceName);
+			boolean parameterMatchesEntityType = parameterType.isAssignableFrom(entityType);
+
+			// We need this check to be sure not to match save(Iterable) for entities implementing Iterable
+			boolean isNotIterable = !parameterType.equals(Iterable.class);
+
+			if (isDomainTypeVariableReference && parameterMatchesEntityType && isNotIterable) {
+				return true;
+			}
+
+			return false;
 		}
 
-		Type boundType = variable.getBounds()[0];
-		String referenceName = boundType instanceof TypeVariable ? boundType.toString() : variable.toString();
-
-		boolean isDomainTypeVariableReference = DOMAIN_TYPE_NAME.equals(referenceName);
-		boolean parameterMatchesEntityType = parameterType.isAssignableFrom(entityType);
-
-		// We need this check to besure not to match save(Iterable) for entities implementing Iterable
-		boolean isNotIterable = !parameterType.equals(Iterable.class);
-
-		if (isDomainTypeVariableReference && parameterMatchesEntityType && isNotIterable) {
-			return true;
+		for (Type type : variable.getBounds()) {
+			if (ResolvableType.forType(type).isAssignableFrom(parameterType)) {
+				return true;
+			}
 		}
 
 		return false;

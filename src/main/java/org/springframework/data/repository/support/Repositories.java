@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2014 the original author or authors.
+ * Copyright 2012-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,9 +18,11 @@ package org.springframework.data.repository.support;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.BeanFactoryUtils;
@@ -39,6 +41,7 @@ import org.springframework.util.ClassUtils;
  * 
  * @author Oliver Gierke
  * @author Thomas Darimont
+ * @author Thomas Eizinger
  */
 public class Repositories implements Iterable<Class<?>> {
 
@@ -78,19 +81,33 @@ public class Repositories implements Iterable<Class<?>> {
 		populateRepositoryFactoryInformation(factory);
 	}
 
-	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private void populateRepositoryFactoryInformation(ListableBeanFactory factory) {
 
 		for (String name : BeanFactoryUtils.beanNamesForTypeIncludingAncestors(factory, RepositoryFactoryInformation.class,
 				false, false)) {
+			cacheRepositoryFactory(name);
+		}
+	}
 
-			RepositoryFactoryInformation repositoryFactoryInformation = beanFactory.getBean(name,
-					RepositoryFactoryInformation.class);
-			Class<?> userDomainType = ClassUtils.getUserClass(repositoryFactoryInformation.getRepositoryInformation()
-					.getDomainType());
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	private synchronized void cacheRepositoryFactory(String name) {
 
-			this.repositoryFactoryInfos.put(userDomainType, repositoryFactoryInformation);
-			this.repositoryBeanNames.put(userDomainType, BeanFactoryUtils.transformedBeanName(name));
+		RepositoryFactoryInformation repositoryFactoryInformation = beanFactory.getBean(name,
+				RepositoryFactoryInformation.class);
+		Class<?> domainType = ClassUtils
+				.getUserClass(repositoryFactoryInformation.getRepositoryInformation().getDomainType());
+
+		RepositoryInformation information = repositoryFactoryInformation.getRepositoryInformation();
+		Set<Class<?>> alternativeDomainTypes = information.getAlternativeDomainTypes();
+		String beanName = BeanFactoryUtils.transformedBeanName(name);
+
+		Set<Class<?>> typesToRegister = new HashSet<Class<?>>(alternativeDomainTypes.size() + 1);
+		typesToRegister.add(domainType);
+		typesToRegister.addAll(alternativeDomainTypes);
+
+		for (Class<?> type : typesToRegister) {
+			this.repositoryFactoryInfos.put(type, repositoryFactoryInformation);
+			this.repositoryBeanNames.put(type, beanName);
 		}
 	}
 
@@ -133,9 +150,18 @@ public class Repositories implements Iterable<Class<?>> {
 
 		Assert.notNull(domainClass, DOMAIN_TYPE_MUST_NOT_BE_NULL);
 
-		RepositoryFactoryInformation<Object, Serializable> repositoryInfo = repositoryFactoryInfos.get(ClassUtils
-				.getUserClass(domainClass));
-		return repositoryInfo == null ? EMPTY_REPOSITORY_FACTORY_INFO : repositoryInfo;
+		Class<?> userType = ClassUtils.getUserClass(domainClass);
+		RepositoryFactoryInformation<Object, Serializable> repositoryInfo = repositoryFactoryInfos.get(userType);
+
+		if (repositoryInfo != null) {
+			return repositoryInfo;
+		}
+
+		if (!userType.equals(Object.class)) {
+			return getRepositoryFactoryInfoFor(userType.getSuperclass());
+		}
+
+		return EMPTY_REPOSITORY_FACTORY_INFO;
 	}
 
 	/**
@@ -165,6 +191,28 @@ public class Repositories implements Iterable<Class<?>> {
 
 		RepositoryFactoryInformation<Object, Serializable> information = getRepositoryFactoryInfoFor(domainClass);
 		return information == EMPTY_REPOSITORY_FACTORY_INFO ? null : information.getRepositoryInformation();
+	}
+
+	/**
+	 * Returns the {@link RepositoryInformation} for the given repository interface.
+	 * 
+	 * @param repositoryInterface must not be {@literal null}.
+	 * @return the {@link RepositoryInformation} for the given repository interface or {@literal null} there's no
+	 *         repository instance registered for the given interface.
+	 * @since 1.12
+	 */
+	public RepositoryInformation getRepositoryInformation(Class<?> repositoryInterface) {
+
+		for (RepositoryFactoryInformation<Object, Serializable> factoryInformation : repositoryFactoryInfos.values()) {
+
+			RepositoryInformation information = factoryInformation.getRepositoryInformation();
+
+			if (information.getRepositoryInterface().equals(repositoryInterface)) {
+				return information;
+			}
+		}
+
+		return null;
 	}
 
 	/**

@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,11 @@
  */
 package org.springframework.data.util;
 
-import static org.springframework.util.ObjectUtils.*;
+import lombok.AccessLevel;
+import lombok.EqualsAndHashCode;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+import lombok.Value;
 
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Constructor;
@@ -49,7 +53,8 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 
 	private final Type type;
 	private final Map<TypeVariable<?>, Type> typeVariableMap;
-	private final Map<String, TypeInformation<?>> fieldTypes = new ConcurrentHashMap<String, TypeInformation<?>>();
+	private final Map<String, ValueHolder> fieldTypes = new ConcurrentHashMap<String, ValueHolder>();
+	private final int hashCode;
 
 	private boolean componentTypeResolved = false;
 	private TypeInformation<?> componentType;
@@ -72,6 +77,7 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 
 		this.type = type;
 		this.typeVariableMap = typeVariableMap;
+		this.hashCode = 17 + (31 * type.hashCode()) + (31 * typeVariableMap.hashCode());
 	}
 
 	/**
@@ -100,10 +106,21 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 			return new ClassTypeInformation((Class<?>) fieldType);
 		}
 
-		Map<TypeVariable, Type> variableMap = GenericTypeResolver.getTypeVariableMap(resolveType(fieldType));
+		Class<S> resolveType = resolveType(fieldType);
+		Map<TypeVariable, Type> variableMap = new HashMap<TypeVariable, Type>();
+		variableMap.putAll(GenericTypeResolver.getTypeVariableMap(resolveType));
 
 		if (fieldType instanceof ParameterizedType) {
+
 			ParameterizedType parameterizedType = (ParameterizedType) fieldType;
+
+			TypeVariable<Class<S>>[] typeParameters = resolveType.getTypeParameters();
+			Type[] arguments = parameterizedType.getActualTypeArguments();
+
+			for (int i = 0; i < typeParameters.length; i++) {
+				variableMap.put(typeParameters[i], arguments[i]);
+			}
+
 			return new ParameterizedTypeInformation(parameterizedType, this, variableMap);
 		}
 
@@ -156,10 +173,12 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 	 */
 	public List<TypeInformation<?>> getParameterTypes(Constructor<?> constructor) {
 
-		Assert.notNull(constructor);
-		List<TypeInformation<?>> result = new ArrayList<TypeInformation<?>>();
+		Assert.notNull(constructor, "Constructor must not be null!");
 
-		for (Type parameterType : constructor.getGenericParameterTypes()) {
+		Type[] types = constructor.getGenericParameterTypes();
+		List<TypeInformation<?>> result = new ArrayList<TypeInformation<?>>(types.length);
+
+		for (Type parameterType : types) {
 			result.add(createInfo(parameterType));
 		}
 
@@ -175,14 +194,14 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 		int separatorIndex = fieldname.indexOf('.');
 
 		if (separatorIndex == -1) {
+
 			if (fieldTypes.containsKey(fieldname)) {
-				return fieldTypes.get(fieldname);
+				return fieldTypes.get(fieldname).getType();
 			}
 
 			TypeInformation<?> propertyInformation = getPropertyInformation(fieldname);
-			if (propertyInformation != null) {
-				fieldTypes.put(fieldname, propertyInformation);
-			}
+			fieldTypes.put(fieldname, ValueHolder.of(propertyInformation));
+
 			return propertyInformation;
 		}
 
@@ -412,12 +431,12 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 	 */
 	public List<TypeInformation<?>> getParameterTypes(Method method) {
 
-		Assert.notNull(method);
+		Assert.notNull(method, "Method most not be null!");
 
-		Type[] parameterTypes = method.getGenericParameterTypes();
-		List<TypeInformation<?>> result = new ArrayList<TypeInformation<?>>(parameterTypes.length);
+		Type[] types = method.getGenericParameterTypes();
+		List<TypeInformation<?>> result = new ArrayList<TypeInformation<?>>(types.length);
 
-		for (Type parameterType : parameterTypes) {
+		for (Type parameterType : types) {
 			result.add(createInfo(parameterType));
 		}
 
@@ -480,6 +499,20 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 		return target.getSuperTypeInformation(getType()).equals(this);
 	}
 
+	/*
+	 * (non-Javadoc)
+	 * @see org.springframework.data.util.TypeInformation#specialize(org.springframework.data.util.ClassTypeInformation)
+	 */
+	@Override
+	public TypeInformation<?> specialize(ClassTypeInformation<?> type) {
+
+		Assert.isTrue(getType().isAssignableFrom(type.getType()));
+
+		List<TypeInformation<?>> arguments = getTypeArguments();
+
+		return arguments.isEmpty() ? type : createInfo(new SyntheticParamterizedType(type, arguments));
+	}
+
 	private TypeInformation<?> getTypeArgument(Class<?> bound, int index) {
 
 		Class<?>[] arguments = GenericTypeResolver.resolveTypeArguments(getType(), bound);
@@ -513,10 +546,7 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 
 		TypeDiscoverer<?> that = (TypeDiscoverer<?>) obj;
 
-		boolean typeEqual = nullSafeEquals(this.type, that.type);
-		boolean typeVariableMapEqual = nullSafeEquals(this.typeVariableMap, that.typeVariableMap);
-
-		return typeEqual && typeVariableMapEqual;
+		return this.type.equals(that.type) && this.typeVariableMap.equals(that.typeVariableMap);
 	}
 
 	/*
@@ -525,12 +555,72 @@ class TypeDiscoverer<S> implements TypeInformation<S> {
 	 */
 	@Override
 	public int hashCode() {
+		return hashCode;
+	}
 
-		int result = 17;
+	/**
+	 * A synthetic {@link ParameterizedType}.
+	 *
+	 * @author Oliver Gierke
+	 * @since 1.11
+	 */
+	@EqualsAndHashCode
+	@RequiredArgsConstructor
+	private static class SyntheticParamterizedType implements ParameterizedType {
 
-		result += nullSafeHashCode(type);
-		result += nullSafeHashCode(typeVariableMap);
+		private final @NonNull ClassTypeInformation<?> typeInformation;
+		private final @NonNull List<TypeInformation<?>> typeParameters;
 
-		return result;
+		/*
+		 * (non-Javadoc)
+		 * @see java.lang.reflect.ParameterizedType#getRawType()
+		 */
+		@Override
+		public Type getRawType() {
+			return typeInformation.getType();
+		}
+
+		/*
+		 * (non-Javadoc)
+		 * @see java.lang.reflect.ParameterizedType#getOwnerType()
+		 */
+		@Override
+		public Type getOwnerType() {
+			return null;
+		}
+
+		/*
+		 * (non-Javadoc)
+		 * @see java.lang.reflect.ParameterizedType#getActualTypeArguments()
+		 */
+		@Override
+		public Type[] getActualTypeArguments() {
+
+			Type[] result = new Type[typeParameters.size()];
+
+			for (int i = 0; i < typeParameters.size(); i++) {
+				result[i] = typeParameters.get(i).getType();
+			}
+
+			return result;
+		}
+	}
+
+	/**
+	 * Simple wrapper to be able to store {@literal null} values in a {@link ConcurrentHashMap}.
+	 *
+	 * @author Oliver Gierke
+	 */
+	@Value
+	@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
+	private static class ValueHolder {
+
+		static ValueHolder NULL_HOLDER = new ValueHolder(null);
+
+		TypeInformation<?> type;
+
+		public static ValueHolder of(TypeInformation<?> type) {
+			return null == type ? NULL_HOLDER : new ValueHolder(type);
+		}
 	}
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2013 the original author or authors.
+ * Copyright 2012-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 package org.springframework.data.util;
 
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.stream.Stream;
 
 import org.springframework.beans.BeanUtils;
 import org.springframework.core.annotation.AnnotationUtils;
@@ -30,9 +32,23 @@ import org.springframework.util.ReflectionUtils.FieldFilter;
  * Spring Data specific reflection utility methods and classes.
  * 
  * @author Oliver Gierke
+ * @author Thomas Darimont
  * @since 1.5
  */
 public abstract class ReflectionUtils {
+
+	private static final Class<?> JAVA8_STREAM_TYPE;
+
+	static {
+
+		Class<?> cls = null;
+
+		try {
+			cls = Class.forName("java.util.stream.Stream");
+		} catch (ClassNotFoundException ignore) {}
+
+		JAVA8_STREAM_TYPE = cls;
+	}
 
 	private ReflectionUtils() {}
 
@@ -207,5 +223,72 @@ public abstract class ReflectionUtils {
 
 		org.springframework.util.ReflectionUtils.makeAccessible(field);
 		org.springframework.util.ReflectionUtils.setField(field, target, value);
+	}
+
+	/**
+	 * Tests whether the given type is assignable to a Java 8 {@link Stream}.
+	 * 
+	 * @param type can be {@literal null}.
+	 * @return
+	 */
+	public static boolean isJava8StreamType(Class<?> type) {
+
+		if (type == null || JAVA8_STREAM_TYPE == null) {
+			return false;
+		}
+
+		return JAVA8_STREAM_TYPE.isAssignableFrom(type);
+	}
+
+	/**
+	 * Finds a constructoron the given type that matches the given constructor arguments.
+	 * 
+	 * @param type must not be {@literal null}.
+	 * @param constructorArguments must not be {@literal null}.
+	 * @return a {@link Constructor} that is compatible with the given arguments or {@literal null} if none found.
+	 */
+	public static Constructor<?> findConstructor(Class<?> type, Object... constructorArguments) {
+
+		Assert.notNull(type, "Target type must not be null!");
+		Assert.notNull(constructorArguments, "Constructor arguments must not be null!");
+
+		for (Constructor<?> candidate : type.getDeclaredConstructors()) {
+
+			Class<?>[] parameterTypes = candidate.getParameterTypes();
+
+			if (argumentsMatch(parameterTypes, constructorArguments)) {
+				return candidate;
+			}
+		}
+
+		return null;
+	}
+
+	private static final boolean argumentsMatch(Class<?>[] parameterTypes, Object[] arguments) {
+
+		if (parameterTypes.length != arguments.length) {
+			return false;
+		}
+
+		int index = 0;
+
+		for (Class<?> argumentType : parameterTypes) {
+
+			Object argument = arguments[index];
+
+			// Reject nulls for primitives
+			if (argumentType.isPrimitive() && argument == null) {
+				return false;
+			}
+
+			// Type check if argument is not null
+			if (argument != null && !ClassUtils.isAssignableValue(argumentType, argument)) {
+				return false;
+			}
+
+			index++;
+		}
+
+		return true;
 	}
 }
